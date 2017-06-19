@@ -26,7 +26,7 @@ def remove_extra_spaces(s:str) -> str:
                       ))
     basic_latin = '\u0000-\u007F'
 
-    def remove_space_between(cls1:str, cls2:str, s:str -> str):
+    def remove_space_between(cls1:str, cls2:str, s:str) -> str:
         p = re.compile('([{}]) ([{}])'.format(cls1, cls2))
         while p.search(s):
             s = p.sub(r'\1\2', s)
