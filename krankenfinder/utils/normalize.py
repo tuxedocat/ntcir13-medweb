@@ -6,7 +6,8 @@ cf. https://github.com/neologd/mecab-ipadic-neologd/wiki/Regexp.ja
 import re
 import unicodedata
 
-def unicode_normalize(cls:str, s:str) -> str:
+
+def unicode_normalize(cls: str, s: str) -> str:
     pt = re.compile('([{}]+)'.format(cls))
 
     def norm(c):
@@ -16,17 +17,18 @@ def unicode_normalize(cls:str, s:str) -> str:
     s = re.sub('－', '-', s)
     return s
 
-def remove_extra_spaces(s:str) -> str:
+
+def remove_extra_spaces(s: str) -> str:
     s = re.sub('[ 　]+', ' ', s)
     blocks = ''.join(('\u4E00-\u9FFF',  # CJK UNIFIED IDEOGRAPHS
                       '\u3040-\u309F',  # HIRAGANA
                       '\u30A0-\u30FF',  # KATAKANA
                       '\u3000-\u303F',  # CJK SYMBOLS AND PUNCTUATION
-                      '\uFF00-\uFFEF'   # HALFWIDTH AND FULLWIDTH FORMS
+                      '\uFF00-\uFFEF'  # HALFWIDTH AND FULLWIDTH FORMS
                       ))
     basic_latin = '\u0000-\u007F'
 
-    def remove_space_between(cls1:str, cls2:str, s:str) -> str:
+    def remove_space_between(cls1: str, cls2: str, s: str) -> str:
         p = re.compile('([{}]) ([{}])'.format(cls1, cls2))
         while p.search(s):
             s = p.sub(r'\1\2', s)
@@ -37,7 +39,8 @@ def remove_extra_spaces(s:str) -> str:
     s = remove_space_between(basic_latin, blocks, s)
     return s
 
-def normalize_neologd(s:str) -> str:
+
+def normalize_neologd(s: str) -> str:
     s = s.strip()
     s = unicode_normalize('０-９Ａ-Ｚａ-ｚ｡-ﾟ', s)
 
@@ -49,13 +52,14 @@ def normalize_neologd(s:str) -> str:
     s = re.sub('[~∼∾〜〰～]', '', s)  # remove tildes
     s = s.translate(
         maketrans('!"#$%&\'()*+,-./:;<=>?@[¥]^_`{|}~｡､･｢｣',
-              '！”＃＄％＆’（）＊＋，－．／：；＜＝＞？＠［￥］＾＿｀｛｜｝〜。、・「」'))
+                  '！”＃＄％＆’（）＊＋，－．／：；＜＝＞？＠［￥］＾＿｀｛｜｝〜。、・「」'))
 
     s = remove_extra_spaces(s)
     s = unicode_normalize('！”＃＄％＆’（）＊＋，－．／：；＜＞？＠［￥］＾＿｀｛｜｝〜', s)  # keep ＝,・,「,」
     s = re.sub('[’]', '\'', s)
     s = re.sub('[”]', '"', s)
     return s
+
 
 if __name__ == "__main__":
     assert "0123456789" == normalize_neologd("０１２３４５６７８９")
@@ -74,11 +78,11 @@ if __name__ == "__main__":
     assert "おお" == normalize_neologd("      おお")
     assert "おお" == normalize_neologd("おお      ")
     assert "検索エンジン自作入門を買いました!!!" == \
-        normalize_neologd("検索 エンジン 自作 入門 を 買い ました!!!")
+           normalize_neologd("検索 エンジン 自作 入門 を 買い ました!!!")
     assert "アルゴリズムC" == normalize_neologd("アルゴリズム C")
     assert "PRML副読本" == normalize_neologd("　　　ＰＲＭＬ　　副　読　本　　　")
     assert "Coding the Matrix" == normalize_neologd("Coding the Matrix")
     assert "南アルプスの天然水Sparking Lemonレモン一絞り" == \
-        normalize_neologd("南アルプスの　天然水　Ｓｐａｒｋｉｎｇ　Ｌｅｍｏｎ　レモン一絞り")
+           normalize_neologd("南アルプスの　天然水　Ｓｐａｒｋｉｎｇ　Ｌｅｍｏｎ　レモン一絞り")
     assert "南アルプスの天然水-Sparking*Lemon+レモン一絞り" == \
-        normalize_neologd("南アルプスの　天然水-　Ｓｐａｒｋｉｎｇ*　Ｌｅｍｏｎ+　レモン一絞り")
+           normalize_neologd("南アルプスの　天然水-　Ｓｐａｒｋｉｎｇ*　Ｌｅｍｏｎ+　レモン一絞り")
