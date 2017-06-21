@@ -1,4 +1,4 @@
-'''Semantic features derived from KNP parser and some heuristics.'''
+"""Semantic features derived from KNP parser and some heuristics."""
 from typing import *
 import pyknp
 from pyknp.knp.blist import BList
@@ -9,30 +9,105 @@ import re
 import functools
 
 KNPFeature = Dict[str, str]
+NOT_AVAILABLE = 'NA'
+
+
+class PASUtils:
+    ARGTYPE = {'ガ': 'ga', 'ヲ': 'wo', 'ニ': 'ni'}
+
+    @classmethod
+    def surface(cls, tags: KNPFeature) -> str:
+        _tag = tags.get('正規化代表表記', NOT_AVAILABLE)
+        surface = _tag.split('/')
+        try:
+            return surface[0]
+        except IndexError:
+            return NOT_AVAILABLE
+
+    @classmethod
+    def tense(cls, tags: KNPFeature) -> str:
+        tensetags = [tag for tag in tags.keys() if tag.startswith('時制')]
+        assert len(tensetags) == 1
+
+        tensetag = tensetags.pop()
+        if tags[tensetag]:
+            return tensetag
+        else:
+            return NOT_AVAILABLE
+
+    @classmethod
+    def ne(cls, tags: KNPFeature) -> str:
+        _tag = tags.get('NE')
+        if not _tag:
+            return NOT_AVAILABLE
+
+        try:
+            ne, surface = _tag.split(':')
+            return ne
+        except ValueError:
+            return NOT_AVAILABLE
+
+    @classmethod
+    def argtype(cls, tags: KNPFeature) -> str:
+        _tag = tags.get('解析格')
+        if _tag:
+            return cls.ARGTYPE.get(_tag)
+        else:
+            return NOT_AVAILABLE
+
+
+class Predicate:
+    def __init__(self, feature: KNPFeature):
+        self.feature = feature
+        self.surface = PASUtils.surface(feature)
+        self.tense = PASUtils.tense(feature)
+
+    def __str__(self):
+        return '{}/{}'.format(self.surface, self.tense)
+
+
+class Argument:
+    def __init__(self, feature: KNPFeature):
+        self.feature = feature
+        self.surface = PASUtils.surface(feature)
+        self.ne = PASUtils.ne(feature)
+
+    def __str__(self):
+        return '{}/{}'.format(self.surface, self.ne)
 
 
 class PAS:
-    def __init__(self,
-                 predicate: KNPFeature,
-                 ga: KNPFeature = None,
-                 wo: KNPFeature = None,
-                 ni: KNPFeature = None):
+    def __init__(self, predicate: Predicate, ga: Argument = None, wo: Argument = None, ni: Argument = None):
         self.p = predicate
-        self.ga = ga
-        self.wo = wo
-        self.ni = ni
+        self.ga = ga if ga else Argument({})
+        self.wo = wo if wo else Argument({})
+        self.ni = ni if ni else Argument({})
 
     def __str__(self):
-        return '述語={}, ガ格={}, ヲ格={}, ニ格={}'.format(self.p, self.ga, self.wo, self.ni)
+        return '述語={}, ガ格={}, ヲ格={}, ニ格={}'.format(self.p.surface, self.ga.surface, self.wo.surface, self.ni.surface)
+
+    def featuredict(self) -> Dict[str, int]:
+        fdic = {}
+        fdic.update({'p-surf-{}'.format(self.p.surface): 1})
+        fdic.update({'p-{}'.format(self.p.tense): 1})
+        fdic.update({'ga-surf-{}'.format(self.ga.surface): 1})
+        fdic.update({'wo-surf-{}'.format(self.wo.surface): 1})
+        fdic.update({'ni-surf-{}'.format(self.ni.surface): 1})
+        fdic.update({'ga-ne-{}'.format(self.ga.ne): 1})
+        fdic.update({'wo-ne-{}'.format(self.wo.ne): 1})
+        fdic.update({'ni-ne-{}'.format(self.ni.ne): 1})
+        self.features = fdic
+        return fdic
 
 
 class SemanticFeatures:
+    """意味的素性抽出器"""
+
     def __init__(self):
         self._knp = pyknp.KNP(jumanpp=True)
 
     def __del__(self):
         del self._knp
-        pass
 
     def parse(self, s: str) -> List[Bunsetsu]:
         return self._knp.parse(s)
@@ -64,27 +139,35 @@ class SemanticFeatures:
         arguments = [features[i] for i in argument_ids]
         return arguments
 
-    def _to_PAS(self, preds: List[KNPFeature], args: List[List[KNPFeature]]) -> List[PAS]:
-        for p, arglist in zip(preds, args):
-            ga, wo, ni = None, None, None
+    def _to_PAS(self, pred: KNPFeature, args: List[KNPFeature]) -> PAS:
+        ga, wo, ni = None, None, None
 
-            for a in arglist:
-                pass
+        predicate = Predicate(pred)
+
+        for a in args:
+            argtype = PASUtils.argtype(a)
+            if argtype == 'ga':
+                ga = Argument(a)
+            elif argtype == 'wo':
+                wo = Argument(a)
+            elif argtype == 'ni':
+                ni = Argument(a)
+
+        return PAS(predicate=predicate, ga=ga, wo=wo, ni=ni)
 
     def get_pas_list(self, s: str) -> List[PAS]:
         parsed = self.parse(s)
         features = [self._get_tag_features(b) for b in parsed]
         predicates = [f for f in features if self._is_predicate(f)]
         arguments = [self._get_arguments_from_predicate_feature(f, features) for f in predicates]
-        return (predicates, arguments)
+        paslist = [self._to_PAS(p, args) for p, args in zip(predicates, arguments)]
+        return paslist
 
-
-def feature_extractor_run():
-    sf = SemanticFeatures()
-    preds, argss = sf.get_pas_list("太郎が、お年寄りに席を譲った人に声をかけていた。")
-    len(preds)
-    assert (True)
-
-
-if __name__ == '__main__':
-    feature_extractor_run()
+    def pas_features(self, s: str) -> Dict[str, int]:
+        """Main API"""
+        featuredict = {}
+        pas_list = self.get_pas_list(s)
+        features = [p.featuredict() for p in pas_list]
+        for fd in features:
+            featuredict.update(fd)
+        return featuredict
