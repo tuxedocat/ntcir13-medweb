@@ -86,8 +86,8 @@ class PAS:
     def __str__(self):
         return '述語={}, ガ格={}, ヲ格={}, ニ格={}'.format(self.p.surface, self.ga.surface, self.wo.surface, self.ni.surface)
 
-    def featuredict(self) -> Dict[str, int]:
-        fdic = {}
+    def featuredict(self, exclude_NAs=True) -> Dict[str, int]:
+        fdic = {}  # type: Dict[str, int]
         fdic.update({'p-surf-{}'.format(self.p.surface): 1})
         fdic.update({'p-{}'.format(self.p.tense): 1})
         fdic.update({'ga-surf-{}'.format(self.ga.surface): 1})
@@ -96,8 +96,12 @@ class PAS:
         fdic.update({'ga-ne-{}'.format(self.ga.ne): 1})
         fdic.update({'wo-ne-{}'.format(self.wo.ne): 1})
         fdic.update({'ni-ne-{}'.format(self.ni.ne): 1})
-        self.features = fdic
-        return fdic
+
+        if exclude_NAs:
+            self.features = {k: v for k, v in fdic.items() if not k.endswith('-NA')}
+        else:
+            self.features = fdic
+        return self.features
 
 
 class SemanticFeatures:
