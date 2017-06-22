@@ -8,6 +8,13 @@ from pyknp.knp.tag import Tag
 import re
 import functools
 
+import logging
+import logging.config
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
+logging.captureWarnings(True)
+
 KNPFeature = Dict[str, str]
 NOT_AVAILABLE = 'NA'
 
@@ -114,7 +121,12 @@ class SemanticFeatures:
         del self._knp
 
     def parse(self, s: str) -> List[Bunsetsu]:
-        return self._knp.parse(s)
+        try:
+            logger.debug(s)
+            return self._knp.parse(s)
+        except ValueError:
+            logging.debug('cannnot parsed sentence {}'.format(s))
+            raise
 
     def _get_tag_features(self, b: Bunsetsu) -> Optional[KNPFeature]:
         _ = b.tag_list().tag_list()[0]
