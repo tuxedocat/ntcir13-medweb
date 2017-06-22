@@ -66,7 +66,7 @@ def argument_dummy():
 
 def test_get_tense(predicate_dummy):
     result = PASUtils.tense(predicate_dummy)
-    assert result == '時制-過去'
+    assert result == '過去'
 
 
 def test_get_ne(argument_dummy):

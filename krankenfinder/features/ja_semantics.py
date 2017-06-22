@@ -27,11 +27,10 @@ class PASUtils:
     @classmethod
     def tense(cls, tags: KNPFeature) -> str:
         tensetags = [tag for tag in tags.keys() if tag.startswith('時制')]
-        assert len(tensetags) == 1
-
-        tensetag = tensetags.pop()
-        if tags[tensetag]:
-            return tensetag
+        if tensetags:
+            # surfaces = [tags[k] for k in tensetags]
+            ts = '-'.join(tensetags).replace('時制-', '')
+            return ts
         else:
             return NOT_AVAILABLE
 
@@ -82,6 +81,7 @@ class PAS:
         self.ga = ga if ga else Argument({})
         self.wo = wo if wo else Argument({})
         self.ni = ni if ni else Argument({})
+        self.features = {}
 
     def __str__(self):
         return '述語={}, ガ格={}, ヲ格={}, ニ格={}'.format(self.p.surface, self.ga.surface, self.wo.surface, self.ni.surface)
@@ -140,7 +140,13 @@ class SemanticFeatures:
                 i = get_argument_id(k)
                 if i is not None:
                     argument_ids.append(i)
-        arguments = [features[i] for i in argument_ids]
+
+        arguments = []
+        for i in argument_ids:
+            try:
+                arguments.append(features[i])
+            except IndexError:
+                pass
         return arguments
 
     def _to_PAS(self, pred: KNPFeature, args: List[KNPFeature]) -> PAS:
@@ -169,7 +175,7 @@ class SemanticFeatures:
 
     def pas_features(self, s: str) -> Dict[str, int]:
         """Main API"""
-        featuredict = {}
+        featuredict = {}  # type: Dict[str, int]
         pas_list = self.get_pas_list(s)
         features = [p.featuredict() for p in pas_list]
         for fd in features:
