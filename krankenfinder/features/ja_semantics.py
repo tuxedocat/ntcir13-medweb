@@ -57,7 +57,7 @@ class PASUtils:
 
 
 class Predicate:
-    def __init__(self, feature: KNPFeature):
+    def __init__(self, feature: KNPFeature) -> None:
         self.feature = feature
         self.surface = PASUtils.surface(feature)
         self.tense = PASUtils.tense(feature)
@@ -67,7 +67,7 @@ class Predicate:
 
 
 class Argument:
-    def __init__(self, feature: KNPFeature):
+    def __init__(self, feature: KNPFeature) -> None:
         self.feature = feature
         self.surface = PASUtils.surface(feature)
         self.ne = PASUtils.ne(feature)
@@ -77,7 +77,7 @@ class Argument:
 
 
 class PAS:
-    def __init__(self, predicate: Predicate, ga: Argument = None, wo: Argument = None, ni: Argument = None):
+    def __init__(self, predicate: Predicate, ga: Argument = None, wo: Argument = None, ni: Argument = None) -> None:
         self.p = predicate
         self.ga = ga if ga else Argument({})
         self.wo = wo if wo else Argument({})
