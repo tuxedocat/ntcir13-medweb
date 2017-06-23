@@ -11,6 +11,7 @@ import pathlib
 import functools
 from collections import Counter
 from copy import deepcopy
+import click
 
 import sklearn
 from sklearn import model_selection
@@ -95,8 +96,7 @@ def tokenizer_func(spacy_model: spacy.en.English) -> Callable[[str], List[str]]:
 
 
 def _binarize_pn(df: pd.DataFrame) -> pd.DataFrame:
-    p_n_columns = df.columns[2:]
-    for c in p_n_columns:
+    for c in LABELCOLS:
         # cast to float64 for later use with sklearn
         df[c] = df[c].apply(lambda s: 1 if s == 'p' else 0).astype(np.float64)
     return df
@@ -121,7 +121,7 @@ def _pp_en(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _check_lang(df: pd.DataFrame) -> str:
-    return df['ID'][0][-2:]
+    return df['ID'].iloc[0][-2:]
 
 
 def preprocess_df(df: pd.DataFrame) -> pd.DataFrame:
@@ -133,6 +133,8 @@ def preprocess_df(df: pd.DataFrame) -> pd.DataFrame:
     :return:
     :rtype:
     """
+    df = _binarize_pn(df)
+
     if _check_lang(df) == 'ja':
         df = _pp_ja(df)
     elif _check_lang(df) == 'en':
@@ -248,7 +250,7 @@ def define_model() -> Union[RandomForestClassifier, RandomizedSearchCV]:
 
     rfcv = model_selection.RandomizedSearchCV(estimator=rf,
                                               param_distributions=search_space,
-                                              n_iter=10,
+                                              n_iter=100,
                                               n_jobs=8,
                                               cv=5
                                               )
@@ -266,7 +268,7 @@ def error_analysis():
     raise NotImplementedError
 
 
-def end2end(task: str = 'ja'):
+def end2end(task: str = 'ja', use_cache: bool = True):
     """Main API"""
     project_root = os.path.dirname(os.path.abspath(__file__)) + '/../'
     if task == 'ja':
@@ -276,12 +278,27 @@ def end2end(task: str = 'ja'):
     else:
         raise ValueError
 
-    df = load_dataset(corpus)
-    df = preprocess_df(df)
-    train_df, test_df = train_test_split(df, random_seed=12345)
+    if use_cache and os.path.exists('cache'):
+        train_df = pd.read_pickle('cache/_{}_train_df_cache.pkl.gz'.format(task))
+        test_df = pd.read_pickle('cache/_{}_test_df_cache.pkl.gz'.format(task))
+        Xtr = np.load('cache/_{}_train_X_cache.npy'.format(task))
+        ytr = np.load('cache/_{}_train_y_cache.npy'.format(task))
+    else:
+        if not os.path.exists('cache'):
+            os.mkdir('cache')
+
+        df = load_dataset(corpus)
+        df = preprocess_df(df)
+        train_df, test_df = train_test_split(df, random_seed=12345)
+        pd.to_pickle(train_df, 'cache/_{}_train_df_cache.pkl.gz'.format(task))
+        pd.to_pickle(test_df, 'cache/_{}_test_df_cache.pkl.gz'.format(task))
+        Xtr = feature_extraction(train_df)
+        Xtr = np.array(list(map(dict, Xtr)))
+        ytr = get_labels(train_df)
+        np.save('cache/_{}_train_X_cache.npy'.format(task), Xtr)
+        np.save('cache/_{}_train_y_cache.npy'.format(task), ytr)
+
     vectrizor = DictVectorizer()
-    Xtr = feature_extraction(train_df)
-    ytr = get_labels(train_df)
 
     # Transform to BoW representation
     Xtr = vectrizor.fit_transform(Xtr)
@@ -294,9 +311,18 @@ def end2end(task: str = 'ja'):
 
     # Evaluation on test split
     logger.debug('Started evaluation.')
-    Xts = feature_extraction(test_df)
+
+    if use_cache:
+        Xts = np.load('cache/_{}_test_X_cache.npy'.format(task))
+        yts = np.load('cache/_{}_test_y_cache.npy'.format(task))
+    else:
+        Xts = feature_extraction(test_df)
+        Xts = np.array(list(map(dict, Xts)))
+        yts = get_labels(test_df)
+        np.save('cache/_{}_test_X_cache.npy'.format(task), Xts)
+        np.save('cache/_{}_test_y_cache.npy'.format(task), yts)
+
     Xts = vectrizor.transform(Xts)
-    yts = get_labels(test_df)
     report, predictions = evaluate_on_testset(rfcv_model, Xts, yts)
     print(report)
     logger.debug('All done.')
@@ -304,5 +330,22 @@ def end2end(task: str = 'ja'):
     # TODO: implement error analysis helper
 
 
+@click.group()
+def cli():
+    pass
+
+
+@cli.command(help='ja: train and eval')
+@click.option('--cache', is_flag=True, default=False)
+def ja(cache):
+    end2end('ja', cache)
+
+
+@cli.command(help='en: train and eval')
+@click.option('--cache', is_flag=True, default=False)
+def en(cache):
+    end2end('en', cache)
+
+
 if __name__ == '__main__':
-    end2end()
+    cli()
