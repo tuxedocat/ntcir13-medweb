@@ -115,7 +115,7 @@ class SemanticFeatures:
     """意味的素性抽出器"""
 
     def __init__(self):
-        self._knp = pyknp.KNP(jumanpp=True)
+        self._knp = pyknp.KNP(jumanpp=False)
 
     def __del__(self):
         del self._knp
