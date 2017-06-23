@@ -102,6 +102,8 @@ ENV/
 
 
 #
-# Dataset
+# Project specific
 #
 data/*.xlsx
+krankenfinder/_cache/*
+

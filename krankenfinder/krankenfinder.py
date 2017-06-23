@@ -11,6 +11,7 @@ import pathlib
 import functools
 from collections import Counter
 from copy import deepcopy
+import pickle
 import click
 
 import sklearn
@@ -74,21 +75,21 @@ def load_dataset(corpus_path: pathlib.Path) -> Optional[pd.DataFrame]:
     return raw
 
 
-def parser_func_mecab_detailed(parser: MeCab) -> Callable[[str], List[Tuple[str, str]]]:
+def _parser_func_mecab_detailed(parser: MeCab) -> Callable[[str], List[Tuple[str, str]]]:
     def parse_to_morphs(s: str) -> List[Tuple[str, str]]:
         return [tuple(l.split('\t')) for l in parser.parse(normalize_neologd(s)).split('\n')]
 
     return parse_to_morphs
 
 
-def parser_func_mecab(parser: MeCab) -> Callable[[str], List[str]]:
+def _parser_func_mecab(parser: MeCab) -> Callable[[str], List[str]]:
     def parse_to_surf(s: str) -> List[str]:
         return [node.surface for node in parser.parse(normalize_neologd(s), as_nodes=True) if node.surface]
 
     return parse_to_surf
 
 
-def tokenizer_func(spacy_model: spacy.en.English) -> Callable[[str], List[str]]:
+def _tokenizer_func(spacy_model: spacy.en.English) -> Callable[[str], List[str]]:
     def tokenizer_f(s: str) -> List[str]:
         return [w.lemma_ for w in spacy_model(s)]
 
@@ -104,7 +105,7 @@ def _binarize_pn(df: pd.DataFrame) -> pd.DataFrame:
 
 def _pp_ja(df: pd.DataFrame) -> pd.DataFrame:
     mecab = MeCab('-d {}'.format(NEOLOGD))
-    parser = parser_func_mecab(mecab)
+    parser = _parser_func_mecab(mecab)
     df['words'] = df['Tweet'].apply(parser)
     # df['raw'] = df['Tweet'].apply(normalize_neologd) # KNP fails to parse with some hankaku characters
     df['raw'] = df['Tweet'].copy()  # TODO: add some preprocess for KNP
@@ -113,7 +114,7 @@ def _pp_ja(df: pd.DataFrame) -> pd.DataFrame:
 
 def _pp_en(df: pd.DataFrame) -> pd.DataFrame:
     sp = spacy.load('en')
-    tokenizer_ = tokenizer_func(sp)
+    tokenizer_ = _tokenizer_func(sp)
     df['words'] = df['Tweet'].apply(tokenizer_)
     # TODO: Implement normalization for English tweets if needed.
     df['raw'] = df['Tweet'].copy()
@@ -268,7 +269,7 @@ def error_analysis():
     raise NotImplementedError
 
 
-def end2end(task: str = 'ja', use_cache: bool = True):
+def end2end(task: str = 'ja', use_cache: bool = True, use_model_cache: bool = True):
     """Main API"""
     project_root = os.path.dirname(os.path.abspath(__file__)) + '/../'
     if task == 'ja':
@@ -278,11 +279,11 @@ def end2end(task: str = 'ja', use_cache: bool = True):
     else:
         raise ValueError
 
-    if use_cache and os.path.exists('cache'):
-        train_df = pd.read_pickle('cache/_{}_train_df_cache.pkl.gz'.format(task))
-        test_df = pd.read_pickle('cache/_{}_test_df_cache.pkl.gz'.format(task))
-        Xtr = np.load('cache/_{}_train_X_cache.npy'.format(task))
-        ytr = np.load('cache/_{}_train_y_cache.npy'.format(task))
+    if use_cache and os.path.exists('_cache'):
+        train_df = pd.read_pickle('_cache/_{}_train_df_cache.pkl.gz'.format(task))
+        test_df = pd.read_pickle('_cache/_{}_test_df_cache.pkl.gz'.format(task))
+        Xtr = np.load('_cache/_{}_train_X_cache.npy'.format(task))
+        ytr = np.load('_cache/_{}_train_y_cache.npy'.format(task))
     else:
         if not os.path.exists('cache'):
             os.mkdir('cache')
@@ -290,37 +291,43 @@ def end2end(task: str = 'ja', use_cache: bool = True):
         df = load_dataset(corpus)
         df = preprocess_df(df)
         train_df, test_df = train_test_split(df, random_seed=12345)
-        pd.to_pickle(train_df, 'cache/_{}_train_df_cache.pkl.gz'.format(task))
-        pd.to_pickle(test_df, 'cache/_{}_test_df_cache.pkl.gz'.format(task))
+        pd.to_pickle(train_df, '_cache/_{}_train_df_cache.pkl.gz'.format(task))
+        pd.to_pickle(test_df, '_cache/_{}_test_df_cache.pkl.gz'.format(task))
         Xtr = feature_extraction(train_df)
         Xtr = np.array(list(map(dict, Xtr)))
         ytr = get_labels(train_df)
-        np.save('cache/_{}_train_X_cache.npy'.format(task), Xtr)
-        np.save('cache/_{}_train_y_cache.npy'.format(task), ytr)
+        np.save('_cache/_{}_train_X_cache.npy'.format(task), Xtr)
+        np.save('_cache/_{}_train_y_cache.npy'.format(task), ytr)
 
     vectrizor = DictVectorizer()
 
     # Transform to BoW representation
     Xtr = vectrizor.fit_transform(Xtr)
 
-    # Train model using randomized CV
-    rfcv_model = define_model()
-    logger.debug('Training model...')
-    rfcv_model.fit(Xtr, ytr)
-    logger.debug('Training model... Done.')
+    if use_model_cache:
+        with open('_cache/rf_model.pkl', 'rb') as f:
+            rfcv_model = pickle.load(f)
+    else:
+        # Train model using randomized CV
+        rfcv_model = define_model()
+        logger.debug('Training model...')
+        rfcv_model.fit(Xtr, ytr)
+        logger.debug('Training model... Done.')
+        with open('_cache/rf_model.pkl', 'wb') as f:
+            pickle.dump(rfcv_model, f)
 
     # Evaluation on test split
     logger.debug('Started evaluation.')
 
     if use_cache:
-        Xts = np.load('cache/_{}_test_X_cache.npy'.format(task))
-        yts = np.load('cache/_{}_test_y_cache.npy'.format(task))
+        Xts = np.load('_cache/_{}_test_X_cache.npy'.format(task))
+        yts = np.load('_cache/_{}_test_y_cache.npy'.format(task))
     else:
         Xts = feature_extraction(test_df)
         Xts = np.array(list(map(dict, Xts)))
         yts = get_labels(test_df)
-        np.save('cache/_{}_test_X_cache.npy'.format(task), Xts)
-        np.save('cache/_{}_test_y_cache.npy'.format(task), yts)
+        np.save('_cache/_{}_test_X_cache.npy'.format(task), Xts)
+        np.save('_cache/_{}_test_y_cache.npy'.format(task), yts)
 
     Xts = vectrizor.transform(Xts)
     report, predictions = evaluate_on_testset(rfcv_model, Xts, yts)
@@ -337,14 +344,16 @@ def cli():
 
 @cli.command(help='ja: train and eval')
 @click.option('--cache', is_flag=True, default=False)
-def ja(cache):
-    end2end('ja', cache)
+@click.option('--model-cache', is_flag=True, default=False)
+def ja(cache, model_cache):
+    end2end('ja', cache, model_cache)
 
 
 @cli.command(help='en: train and eval')
 @click.option('--cache', is_flag=True, default=False)
-def en(cache):
-    end2end('en', cache)
+@click.option('--model-cache', is_flag=True, default=False)
+def en(cache, model_cache):
+    end2end('en', cache, model_cache)
 
 
 if __name__ == '__main__':
