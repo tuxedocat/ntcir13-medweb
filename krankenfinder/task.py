@@ -27,8 +27,8 @@ import pyknp
 from natto import MeCab, MeCabNode
 import spacy
 
-from features.ja_semantics import SemanticFeatures
-from utils.normalize import normalize_neologd
+from krankenfinder.features.ja_semantics import SemanticFeatures
+from krankenfinder.utils.normalize import normalize_neologd
 
 import logging
 import logging.config
@@ -43,10 +43,11 @@ except KeyError:
     NEOLOGD = '/usr/lib/mecab/dic/mecab-ipadic-neologd/'
 
 LABELCOLS = ['Influenza', 'Diarrhea', 'Hayfever', 'Cough', 'Headache', 'Fever', 'Runnynose', 'Cold']
+Model = Union[RandomForestClassifier, RandomizedSearchCV]
 
 
 class ModelDefinition:
-    def __init__(self, model: Union[RandomForestClassifier, RandomizedSearchCV],
+    def __init__(self, model: Model,
                  dv: DictVectorizer, comment: str = None) -> None:
         self.model = model
         self.dv = dv
@@ -163,7 +164,7 @@ def train_test_split(df: pd.DataFrame, ratio: float = 0.8, random_seed: Optional
     split_id = int(len(df) * ratio)
     _df = sklearn.utils.shuffle(df.copy(), random_state=random_seed)
     train = _df.iloc[:split_id]
-    test = df.iloc[split_id:]
+    test = _df.iloc[split_id:]
     return train, test
 
 
@@ -238,7 +239,7 @@ def get_labels(df: pd.DataFrame) -> np.array:
     return df[LABELCOLS].values
 
 
-def define_model() -> Union[RandomForestClassifier, RandomizedSearchCV]:
+def define_model() -> Model:
     # TODO: needs refinements
     rf = RandomForestClassifier(random_state=None)
 
@@ -258,15 +259,59 @@ def define_model() -> Union[RandomForestClassifier, RandomizedSearchCV]:
     return rfcv
 
 
-def evaluate_on_testset(model: Union[RandomForestClassifier, RandomizedSearchCV], X_test, y_test) \
-        -> Tuple[str, np.array]:
+def evaluate_on_testset(model: Model, X_test, y_test) -> Tuple[str, np.array]:
     predictions = model.predict(X_test)
     report = metrics.classification_report(y_test, predictions, target_names=LABELCOLS)
     return report, predictions
 
 
-def error_analysis():
-    raise NotImplementedError
+# def _annotate_errors(df_info: pd.DataFrame, prefix_gold: str = 'gold_', prefix_pred: str = 'pred_') -> pd.DataFrame:
+#     """Annotate result types (TP/FP/FN/TN)"""
+#     for c in LABELCOLS:
+#         df_info[c] =
+
+def _get_types(v: int) -> str:
+    if v == 0:
+        return 'TN'
+    elif v == -1:
+        return 'FP'
+    elif v == 1:
+        return 'FN'
+    elif v == 2:
+        return 'TP'
+    else:
+        return 'NA'
+
+
+def error_analysis(df_test: pd.DataFrame, predictions: np.array, model: Model) -> pd.DataFrame:
+    """Get detailed information for analysing error cases."""
+    # Prefix for columns
+    P_G = 'gold_'
+    P_P = 'pred_'
+    P_C = 'code_'
+
+    _columns = ['ID', 'Tweet'] + LABELCOLS
+    rename_dic = {org: P_G + org for org in LABELCOLS}
+
+    df = df_test.loc[:, _columns].copy()
+    df = df.rename(columns=rename_dic)
+
+    # Add prediction columns to df
+    for c in range(predictions.shape[1]):
+        col = pd.Series(predictions[:, c], index=df_test['ID'], dtype=np.float64)
+        name = P_P + LABELCOLS[c]
+        df[name] = col.values
+
+    # Add metadata
+    for c in LABELCOLS:
+        g = P_G + c
+        p = P_P + c
+        code_col = P_C + c
+        # Encode TN/FP/FN/TP -> 0, -1, 1, 2
+        df[code_col] = (df[g] * (df[g] + df[p]) + df[p] * (df[g] - df[p])).astype(np.int64)
+        df[c] = df[code_col].apply(_get_types)
+
+    return df[_columns]
 
 
 def end2end(task: str = 'ja', use_cache: bool = True, use_model_cache: bool = True):
@@ -276,6 +321,10 @@ def end2end(task: str = 'ja', use_cache: bool = True, use_model_cache: bool = Tr
         corpus = pathlib.Path(project_root) / pathlib.Path('data/ja_train_20170501.xlsx')
     elif task == 'en':
         corpus = pathlib.Path(project_root) / pathlib.Path('data/en_train_20170501.xlsx')
+    elif task == 'ja-dev':
+        corpus = pathlib.Path(project_root) / pathlib.Path('data/ja_train_mini.xlsx')
+    elif task == 'en-dev':
+        corpus = pathlib.Path(project_root) / pathlib.Path('data/en_train_mini.xlsx')
     else:
         raise ValueError
 
@@ -332,9 +381,12 @@ def end2end(task: str = 'ja', use_cache: bool = True, use_model_cache: bool = Tr
     Xts = vectrizor.transform(Xts)
     report, predictions = evaluate_on_testset(rfcv_model, Xts, yts)
     print(report)
-    logger.debug('All done.')
 
-    # TODO: implement error analysis helper
+    report_df = error_analysis(test_df, predictions, rfcv_model)
+    report_df.to_csv('analysis.csv', index=False)
+    report_df.to_excel('analysis.xlsx', sheet_name='result', index=False)
+
+    logger.debug('All done.')
 
 
 @click.group()
