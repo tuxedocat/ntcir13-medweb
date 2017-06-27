@@ -319,17 +319,21 @@ def get_interpretation_of_model(model: Model, transformer: DictVectorizer) -> pd
     return pd.DataFrame(sorted(d, key=lambda x: x[1], reverse=True), columns=["feature", "importance"])
 
 
-def end2end(task: str = 'ja', use_cache: bool = True, use_model_cache: bool = True):
+def end2end(task: str = 'ja',
+            use_cache: bool = True,
+            use_model_cache: bool = True,
+            cache_dir: str = None,
+            report_dir: str = None):
     """Main API"""
-    project_root = os.path.dirname(os.path.abspath(__file__)) + '/../'
+    project_root = pathlib.Path(os.path.dirname(os.path.abspath(__file__)) + '/../')
     if task == 'ja':
-        corpus = pathlib.Path(project_root) / pathlib.Path('data/ja_train_20170501.xlsx')
+        corpus = project_root / pathlib.Path('data/ja_train_20170501.xlsx')
     elif task == 'en':
-        corpus = pathlib.Path(project_root) / pathlib.Path('data/en_train_20170501.xlsx')
+        corpus = project_root / pathlib.Path('data/en_train_20170501.xlsx')
     elif task == 'ja-dev':
-        corpus = pathlib.Path(project_root) / pathlib.Path('data/ja_train_mini.xlsx')
+        corpus = project_root / pathlib.Path('data/ja_train_mini.xlsx')
     elif task == 'en-dev':
-        corpus = pathlib.Path(project_root) / pathlib.Path('data/en_train_mini.xlsx')
+        corpus = project_root / pathlib.Path('data/en_train_mini.xlsx')
     else:
         raise ValueError
 
@@ -387,34 +391,37 @@ def end2end(task: str = 'ja', use_cache: bool = True, use_model_cache: bool = Tr
     report, predictions = evaluate_on_testset(rfcv_model, Xts, yts)
     print(report)
 
+    if report_dir:
+        _report_dir = pathlib.Path(report_dir)
+    else:
+        _report_dir = project_root / pathlib.Path('reports')
+
+    if not _report_dir.exists():
+        _report_dir.mkdir()
+
     report_df = error_analysis(test_df, predictions, rfcv_model)
-    report_df.to_csv('analysis.csv', index=False)
-    report_df.to_excel('analysis.xlsx', sheet_name='result', index=False)
+    analysis_fn = _report_dir / pathlib.Path('analysis')
+    modelreport_fn = _report_dir / pathlib.Path('feature_importance')
+
+    # Pandas doesn't work properly with Path obj., conversion to string is workaround.
+    report_df.to_csv(str(analysis_fn.with_suffix('.csv')), index=False)
+    report_df.to_excel(str(analysis_fn.with_suffix('.xlsx')), sheet_name='result', index=False)
 
     model_interpretation = get_interpretation_of_model(rfcv_model, vectorizer)
-    model_interpretation.to_csv('feature_importance.csv')
-    model_interpretation.to_excel('feature_importance.xlsx', sheet_name='features')
+    model_interpretation.to_csv(str(modelreport_fn.with_suffix('.csv')))
+    model_interpretation.to_excel(str(modelreport_fn.with_suffix('.xlsx')), sheet_name='features')
 
     logger.debug('All done.')
 
 
-@click.group()
-def cli():
-    pass
-
-
-@cli.command(help='ja: train and eval')
+@click.command()
+@click.argument('task', type=str)
 @click.option('--cache', is_flag=True, default=False)
 @click.option('--model-cache', is_flag=True, default=False)
-def ja(cache, model_cache):
-    end2end('ja', cache, model_cache)
-
-
-@cli.command(help='en: train and eval')
-@click.option('--cache', is_flag=True, default=False)
-@click.option('--model-cache', is_flag=True, default=False)
-def en(cache, model_cache):
-    end2end('en', cache, model_cache)
+@click.option('--cache-dir', type=str, default='.')
+@click.option('--report-dir', type=str, default='../reports')
+def cli(task, cache, model_cache, cache_dir, report_dir):
+    end2end(task, cache, model_cache)
 
 
 if __name__ == '__main__':
