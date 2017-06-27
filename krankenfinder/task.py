@@ -265,11 +265,6 @@ def evaluate_on_testset(model: Model, X_test, y_test) -> Tuple[str, np.array]:
     return report, predictions
 
 
-# def _annotate_errors(df_info: pd.DataFrame, prefix_gold: str = 'gold_', prefix_pred: str = 'pred_') -> pd.DataFrame:
-#     """Annotate result types (TP/FP/FN/TN)"""
-#     for c in LABELCOLS:
-#         df_info[c] =
-
 def _get_types(v: int) -> str:
     if v == 0:
         return 'TN'
@@ -307,11 +302,21 @@ def error_analysis(df_test: pd.DataFrame, predictions: np.array, model: Model) -
         g = P_G + c
         p = P_P + c
         code_col = P_C + c
-        # Encode TN/FP/FN/TP -> 0, -1, 1, 2
+        # Encode TN/FP/FN/TP -> 0, -1, 1, 2 -> get error-name as string
         df[code_col] = (df[g] * (df[g] + df[p]) + df[p] * (df[g] - df[p])).astype(np.int64)
         df[c] = df[code_col].apply(_get_types)
 
     return df[_columns]
+
+
+def get_interpretation_of_model(model: Model, transformer: DictVectorizer) -> pd.DataFrame:
+    try:
+        f_importances = model.feature_importances_
+    except AttributeError:
+        f_importances = model.best_estimator_.feature_importances_
+
+    d = [(fname, weight) for fname, weight in zip(transformer.feature_names_, f_importances)]
+    return pd.DataFrame(sorted(d, key=lambda x: x[1], reverse=True), columns=["feature", "importance"])
 
 
 def end2end(task: str = 'ja', use_cache: bool = True, use_model_cache: bool = True):
@@ -348,10 +353,10 @@ def end2end(task: str = 'ja', use_cache: bool = True, use_model_cache: bool = Tr
         np.save('_cache/_{}_train_X_cache.npy'.format(task), Xtr)
         np.save('_cache/_{}_train_y_cache.npy'.format(task), ytr)
 
-    vectrizor = DictVectorizer()
+    vectorizer = DictVectorizer()
 
     # Transform to BoW representation
-    Xtr = vectrizor.fit_transform(Xtr)
+    Xtr = vectorizer.fit_transform(Xtr)
 
     if use_model_cache:
         with open('_cache/rf_model.pkl', 'rb') as f:
@@ -378,13 +383,17 @@ def end2end(task: str = 'ja', use_cache: bool = True, use_model_cache: bool = Tr
         np.save('_cache/_{}_test_X_cache.npy'.format(task), Xts)
         np.save('_cache/_{}_test_y_cache.npy'.format(task), yts)
 
-    Xts = vectrizor.transform(Xts)
+    Xts = vectorizer.transform(Xts)
     report, predictions = evaluate_on_testset(rfcv_model, Xts, yts)
     print(report)
 
     report_df = error_analysis(test_df, predictions, rfcv_model)
     report_df.to_csv('analysis.csv', index=False)
     report_df.to_excel('analysis.xlsx', sheet_name='result', index=False)
+
+    model_interpretation = get_interpretation_of_model(rfcv_model, vectorizer)
+    model_interpretation.to_csv('feature_importance.csv')
+    model_interpretation.to_excel('feature_importance.xlsx', sheet_name='features')
 
     logger.debug('All done.')
 

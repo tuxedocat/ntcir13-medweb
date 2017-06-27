@@ -40,6 +40,7 @@ def test_feature_extractor(load_dataframe):
     print(X)
 
 
+@pytest.fixture
 def test_evaluation(load_dataframe):
     df = load_dataframe
     df = task.preprocess_df(df)
@@ -48,17 +49,25 @@ def test_evaluation(load_dataframe):
     Xtr = task.feature_extraction(train_df)
     Xtr = np.array(list(map(dict, Xtr)))
     ytr = task.get_labels(train_df)
-    vectrizor = DictVectorizer()
-    Xtr = vectrizor.fit_transform(Xtr)
+    vectorizer = DictVectorizer()
+    Xtr = vectorizer.fit_transform(Xtr)
     rfcv_model = task.define_model()
     rfcv_model.fit(Xtr, ytr)
 
     Xts = task.feature_extraction(test_df)
     Xts = np.array(list(map(dict, Xts)))
     yts = task.get_labels(test_df)
-    Xts = vectrizor.transform(Xts)
+    Xts = vectorizer.transform(Xts)
     report, predictions = task.evaluate_on_testset(rfcv_model, Xts, yts)
     print(report)
 
     report_df = task.error_analysis(test_df, predictions, rfcv_model)
     print(report_df)
+
+    return rfcv_model, vectorizer
+
+
+def test_model_interpreter(test_evaluation):
+    model, vect = test_evaluation
+    df = task.get_interpretation_of_model(model, vect)
+    print(df)
