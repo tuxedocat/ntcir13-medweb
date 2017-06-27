@@ -27,8 +27,8 @@ import pyknp
 from natto import MeCab, MeCabNode
 import spacy
 
-from features.ja_semantics import SemanticFeatures
-from utils.normalize import normalize_neologd
+from krankenfinder.features.ja_semantics import SemanticFeatures
+from krankenfinder.utils.normalize import normalize_neologd
 
 import logging
 import logging.config
