@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import seaborn
 import os
 import sys
-import pathlib
+from pathlib import Path
 import functools
 from collections import Counter
 from copy import deepcopy
@@ -54,7 +54,7 @@ class ModelDefinition:
         self.comments = comment if comment else ''
 
 
-def load_dataset(corpus_path: pathlib.Path) -> Optional[pd.DataFrame]:
+def load_dataset(corpus_path: Path) -> Optional[pd.DataFrame]:
     """Load dataset from given xlsx or csv files, as dataframe
 
     :param corpus_path:
@@ -174,6 +174,8 @@ def add_surface_feature(df: pd.DataFrame) -> pd.DataFrame:
     def get_counts_of_words(l: List[str]) -> List[Tuple[str, int]]:
         return list(Counter(l).items())
 
+    logger = logging.getLogger(__name__)
+
     df['f_surface'] = df['words'].apply(get_counts_of_words)
     logger.info('Extracted word-surface features')
     return df
@@ -185,6 +187,9 @@ def add_semantic_feature(df: pd.DataFrame, verbose=False) -> pd.DataFrame:
     .. note:: currently implemented only for Japanese tweets
     """
     fe = SemanticFeatures(verbose=verbose)
+    logger = logging.getLogger(__name__)
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG)
 
     logger.info('Started extracting semantic features')
 
@@ -230,7 +235,6 @@ def feature_extraction(df: pd.DataFrame, surface=True, semantic=True, verbose=Fa
 
     df['features'] = np.empty((len(df['ID']), 0)).tolist()
     _merge_feature_columns(df)
-    logger.info('Extracted features')
 
     return df['features'].values
 
@@ -320,6 +324,11 @@ def get_interpretation_of_model(model: Model, transformer: DictVectorizer) -> pd
     return pd.DataFrame(sorted(d, key=lambda x: x[1], reverse=True), columns=["feature", "importance"])
 
 
+def get_fn(dirpath: Path, name: str, ext: str) -> str:
+    p = str(dirpath / Path('{}'.format(name)).with_suffix(ext))
+    return p
+
+
 def end2end(task: str = 'ja',
             use_cache: bool = True,
             use_model_cache: bool = True,
@@ -329,48 +338,64 @@ def end2end(task: str = 'ja',
             random_seed: int = None,
             verbose: bool = False):
     """Main API"""
-    project_root = pathlib.Path(os.path.dirname(os.path.abspath(__file__)) + '/../')
+    logging.captureWarnings(True)
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+
+    project_root = Path(os.path.dirname(os.path.abspath(__file__)) + '/../')
     if task == 'ja':
-        corpus = project_root / pathlib.Path('data/ja_train_20170501.xlsx')
+        corpus = project_root / Path('data/ja_train_20170501.xlsx')
     elif task == 'en':
-        corpus = project_root / pathlib.Path('data/en_train_20170501.xlsx')
+        corpus = project_root / Path('data/en_train_20170501.xlsx')
     elif task == 'ja-dev':
-        corpus = project_root / pathlib.Path('data/ja_train_mini.xlsx')
+        corpus = project_root / Path('data/ja_train_mini.xlsx')
     elif task == 'en-dev':
-        corpus = project_root / pathlib.Path('data/en_train_mini.xlsx')
+        corpus = project_root / Path('data/en_train_mini.xlsx')
     else:
         raise ValueError
 
     _f_surface = True if 'suf-bow' in features else False
     _f_semantic = True if 'pas' in features else False
 
-    if use_cache and os.path.exists('_cache'):
-        train_df = pd.read_pickle('_cache/_{}_train_df_cache.pkl.gz'.format(task))
-        test_df = pd.read_pickle('_cache/_{}_test_df_cache.pkl.gz'.format(task))
-        Xtr = np.load('_cache/_{}_train_X_cache.npy'.format(task))
-        ytr = np.load('_cache/_{}_train_y_cache.npy'.format(task))
+    if report_dir:
+        _report_dir = Path(report_dir)
     else:
-        if not os.path.exists('_cache'):
-            os.mkdir('_cache')
+        _report_dir = project_root / Path('reports')
 
+    if not _report_dir.exists():
+        _report_dir.mkdir(exist_ok=True)
+
+    cache_dir = _report_dir / Path('_cache')
+    if not cache_dir.exists():
+        cache_dir.mkdir(exist_ok=True)
+
+    if use_cache and cache_dir.exists():
+        train_df = pd.read_pickle(get_fn(cache_dir, task + '_train', '.pkl.gz'))
+        test_df = pd.read_pickle(get_fn(cache_dir, task + '_test', '.pkl.gz'))
+        Xtr = np.load(get_fn(cache_dir, task + '_Xtrain', '.npy'))
+        ytr = np.load(get_fn(cache_dir, task + '_ytrain', '.npy'))
+    else:
         df = load_dataset(corpus)
         df = preprocess_df(df)
         train_df, test_df = train_test_split(df, random_seed=random_seed)
-        pd.to_pickle(train_df, '_cache/_{}_train_df_cache.pkl.gz'.format(task))
-        pd.to_pickle(test_df, '_cache/_{}_test_df_cache.pkl.gz'.format(task))
+        pd.to_pickle(train_df, get_fn(cache_dir, task + '_train', '.pkl.gz'))
+        pd.to_pickle(test_df, get_fn(cache_dir, task + '_test', '.pkl.gz'))
         Xtr = feature_extraction(train_df, surface=_f_surface, semantic=_f_semantic, verbose=verbose)
         Xtr = np.array(list(map(dict, Xtr)))
         ytr = get_labels(train_df)
-        np.save('_cache/_{}_train_X_cache.npy'.format(task), Xtr)
-        np.save('_cache/_{}_train_y_cache.npy'.format(task), ytr)
+        np.save(get_fn(cache_dir, task + '_Xtrain', '.npy'), Xtr)
+        np.save(get_fn(cache_dir, task + '_ytrain', '.npy'), ytr)
 
     vectorizer = DictVectorizer()
 
     # Transform to BoW representation
     Xtr = vectorizer.fit_transform(Xtr)
+    logger.info('Extracted features')
 
     if use_model_cache:
-        with open('_cache/rf_model.pkl', 'rb') as f:
+        with open(get_fn(cache_dir, 'model', '.pkl'), 'rb') as f:
             rfcv_model = pickle.load(f)
     else:
         # Train model using randomized CV
@@ -378,38 +403,30 @@ def end2end(task: str = 'ja',
         logger.info('Training model...')
         rfcv_model.fit(Xtr, ytr)
         logger.info('Training model... Done.')
-        with open('_cache/rf_model.pkl', 'wb') as f:
+        with open(get_fn(cache_dir, 'model', '.pkl'), 'wb') as f:
             pickle.dump(rfcv_model, f)
 
     # Evaluation on test split
     logger.info('Started evaluation.')
 
     if use_cache:
-        Xts = np.load('_cache/_{}_test_X_cache.npy'.format(task))
-        yts = np.load('_cache/_{}_test_y_cache.npy'.format(task))
+        Xts = np.load(get_fn(cache_dir, task + '_Xtest', '.npy'))
+        yts = np.load(get_fn(cache_dir, task + '_ytest', '.npy'))
     else:
         Xts = feature_extraction(test_df, surface=_f_surface, semantic=_f_semantic, verbose=verbose)
         Xts = np.array(list(map(dict, Xts)))
         yts = get_labels(test_df)
-        np.save('_cache/_{}_test_X_cache.npy'.format(task), Xts)
-        np.save('_cache/_{}_test_y_cache.npy'.format(task), yts)
+        np.save(get_fn(cache_dir, task + '_Xtest', '.npy'), Xts)
+        np.save(get_fn(cache_dir, task + '_ytest', '.npy'), yts)
 
     Xts = vectorizer.transform(Xts)
     report, predictions = evaluate_on_testset(rfcv_model, Xts, yts)
     print(report)
 
-    if report_dir:
-        _report_dir = pathlib.Path(report_dir)
-    else:
-        _report_dir = project_root / pathlib.Path('reports')
-
-    if not _report_dir.exists():
-        _report_dir.mkdir(exist_ok=True)
-
     report_df = error_analysis(test_df, predictions, rfcv_model)
-    result_fn = _report_dir / pathlib.Path('result.log')
-    analysis_fn = _report_dir / pathlib.Path('analysis')
-    modelreport_fn = _report_dir / pathlib.Path('feature_importance')
+    result_fn = _report_dir / Path('result.log')
+    analysis_fn = _report_dir / Path('analysis')
+    modelreport_fn = _report_dir / Path('feature_importance')
 
     with result_fn.open('w') as log:
         log.write(report)
@@ -443,8 +460,6 @@ def end2end(task: str = 'ja',
 @click.option('--seed', type=int, help='random seed which is used for train/test split')
 def cli(task, cache, model_cache, cache_dir, report_dir, feature, seed, verbose):
     print(feature)
-    if verbose:
-        logging.basicConfig(level=logging.DEBUG)
     end2end(task=task, use_cache=cache, use_model_cache=model_cache, report_dir=report_dir, features=feature,
             random_seed=seed, verbose=verbose)
 
