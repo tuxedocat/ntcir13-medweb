@@ -350,8 +350,8 @@ def end2end(task: str = 'ja',
         Xtr = np.load('_cache/_{}_train_X_cache.npy'.format(task))
         ytr = np.load('_cache/_{}_train_y_cache.npy'.format(task))
     else:
-        if not os.path.exists('cache'):
-            os.mkdir('cache')
+        if not os.path.exists('_cache'):
+            os.mkdir('_cache')
 
         df = load_dataset(corpus)
         df = preprocess_df(df)
