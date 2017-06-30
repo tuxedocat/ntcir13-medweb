@@ -34,7 +34,7 @@ import logging
 import logging.config
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 logging.captureWarnings(True)
 
 try:
@@ -72,7 +72,7 @@ def load_dataset(corpus_path: pathlib.Path) -> Optional[pd.DataFrame]:
     else:
         raise NotImplementedError('Only xlsx corpus is allowed.')
 
-    logger.debug('Data loaded: {}'.format(str(corpus_path.name)))
+    logger.info('Data loaded: {}'.format(str(corpus_path.name)))
     return raw
 
 
@@ -144,7 +144,7 @@ def preprocess_df(df: pd.DataFrame) -> pd.DataFrame:
     else:
         raise NotImplementedError('Not implemented for this language')
 
-    logger.debug('Finished preprocessing')
+    logger.info('Finished preprocessing')
     return df
 
 
@@ -175,25 +175,25 @@ def add_surface_feature(df: pd.DataFrame) -> pd.DataFrame:
         return list(Counter(l).items())
 
     df['f_surface'] = df['words'].apply(get_counts_of_words)
-    logger.debug('Extracted word-surface features')
+    logger.info('Extracted word-surface features')
     return df
 
 
-def add_semantic_feature(df: pd.DataFrame) -> pd.DataFrame:
+def add_semantic_feature(df: pd.DataFrame, verbose=False) -> pd.DataFrame:
     """Add semantic feature column to given dataframe
 
     .. note:: currently implemented only for Japanese tweets
     """
-    fe = SemanticFeatures()
+    fe = SemanticFeatures(verbose=verbose)
 
-    logger.debug('Started extracting semantic features')
+    logger.info('Started extracting semantic features')
 
     def get_semantic_featuredict(s: str) -> List[Tuple[str, int]]:
         _ = fe.pas_features(s)  # type: Dict[str, int]
         return list(_.items())
 
     df['f_semantic'] = df['raw'].apply(get_semantic_featuredict)
-    logger.debug('Extracted semantic features')
+    logger.info('Extracted semantic features')
     return df
 
 
@@ -217,7 +217,7 @@ def _merge_feature_columns(df: pd.DataFrame) -> pd.DataFrame:
         _merge_feature_columns(df)
 
 
-def feature_extraction(df: pd.DataFrame, surface=True, semantic=True) -> np.array:
+def feature_extraction(df: pd.DataFrame, surface=True, semantic=True, verbose=False) -> np.array:
     # use deepcopy instead of df.copy() because it doesn't recursively copy objects even when deep=True.
     df = deepcopy(df)
     if surface:
@@ -226,11 +226,11 @@ def feature_extraction(df: pd.DataFrame, surface=True, semantic=True) -> np.arra
     if semantic:
         lang = _check_lang(df)
         if lang == 'ja':
-            df = add_semantic_feature(df)
+            df = add_semantic_feature(df, verbose=verbose)
 
     df['features'] = np.empty((len(df['ID']), 0)).tolist()
     _merge_feature_columns(df)
-    logger.debug('Extracted features')
+    logger.info('Extracted features')
 
     return df['features'].values
 
@@ -266,6 +266,7 @@ def evaluate_on_testset(model: Model, X_test, y_test) -> Tuple[str, np.array]:
 
 
 def _get_types(v: int) -> str:
+    """Get string representations of error-types from integer-encoding"""
     if v == 0:
         return 'TN'
     elif v == -1:
@@ -324,7 +325,9 @@ def end2end(task: str = 'ja',
             use_model_cache: bool = True,
             cache_dir: str = None,
             report_dir: str = None,
-            features: List[str] = None):
+            features: List[str] = None,
+            random_seed: int = None,
+            verbose: bool = False):
     """Main API"""
     project_root = pathlib.Path(os.path.dirname(os.path.abspath(__file__)) + '/../')
     if task == 'ja':
@@ -352,10 +355,10 @@ def end2end(task: str = 'ja',
 
         df = load_dataset(corpus)
         df = preprocess_df(df)
-        train_df, test_df = train_test_split(df, random_seed=12345)
+        train_df, test_df = train_test_split(df, random_seed=random_seed)
         pd.to_pickle(train_df, '_cache/_{}_train_df_cache.pkl.gz'.format(task))
         pd.to_pickle(test_df, '_cache/_{}_test_df_cache.pkl.gz'.format(task))
-        Xtr = feature_extraction(train_df, surface=_f_surface, semantic=_f_semantic)
+        Xtr = feature_extraction(train_df, surface=_f_surface, semantic=_f_semantic, verbose=verbose)
         Xtr = np.array(list(map(dict, Xtr)))
         ytr = get_labels(train_df)
         np.save('_cache/_{}_train_X_cache.npy'.format(task), Xtr)
@@ -372,20 +375,20 @@ def end2end(task: str = 'ja',
     else:
         # Train model using randomized CV
         rfcv_model = define_model()
-        logger.debug('Training model...')
+        logger.info('Training model...')
         rfcv_model.fit(Xtr, ytr)
-        logger.debug('Training model... Done.')
+        logger.info('Training model... Done.')
         with open('_cache/rf_model.pkl', 'wb') as f:
             pickle.dump(rfcv_model, f)
 
     # Evaluation on test split
-    logger.debug('Started evaluation.')
+    logger.info('Started evaluation.')
 
     if use_cache:
         Xts = np.load('_cache/_{}_test_X_cache.npy'.format(task))
         yts = np.load('_cache/_{}_test_y_cache.npy'.format(task))
     else:
-        Xts = feature_extraction(test_df, surface=_f_surface, semantic=_f_semantic)
+        Xts = feature_extraction(test_df, surface=_f_surface, semantic=_f_semantic, verbose=verbose)
         Xts = np.array(list(map(dict, Xts)))
         yts = get_labels(test_df)
         np.save('_cache/_{}_test_X_cache.npy'.format(task), Xts)
@@ -404,8 +407,19 @@ def end2end(task: str = 'ja',
         _report_dir.mkdir(exist_ok=True)
 
     report_df = error_analysis(test_df, predictions, rfcv_model)
+    result_fn = _report_dir / pathlib.Path('result.log')
     analysis_fn = _report_dir / pathlib.Path('analysis')
     modelreport_fn = _report_dir / pathlib.Path('feature_importance')
+
+    with result_fn.open('w') as log:
+        log.write(report)
+        log.write('\n\n')
+        log.write('seed={}\n'.format(random_seed))
+        log.write('features={}\n'.format(features))
+        try:
+            log.write('model={}\n'.format(rfcv_model.best_estimator_))
+        except AttributeError:
+            log.write('model={}\n'.format(rfcv_model))
 
     # Pandas doesn't work properly with Path obj., conversion to string is workaround.
     report_df.to_csv(str(analysis_fn.with_suffix('.csv')), index=False)
@@ -415,7 +429,7 @@ def end2end(task: str = 'ja',
     model_interpretation.to_csv(str(modelreport_fn.with_suffix('.csv')))
     model_interpretation.to_excel(str(modelreport_fn.with_suffix('.xlsx')), sheet_name='features')
 
-    logger.debug('All done.')
+    logger.info('All done.')
 
 
 @click.command()
@@ -425,9 +439,14 @@ def end2end(task: str = 'ja',
 @click.option('--cache-dir', type=str, default='.')
 @click.option('--report-dir', type=str, default='../reports')
 @click.option('--feature', '-f', type=str, multiple=True, help='eg. -f pas -f suf-bow')
-def cli(task, cache, model_cache, cache_dir, report_dir, feature):
+@click.option('--verbose', '-v', is_flag=True, default=False)
+@click.option('--seed', type=int, help='random seed which is used for train/test split')
+def cli(task, cache, model_cache, cache_dir, report_dir, feature, seed, verbose):
     print(feature)
-    end2end(task=task, use_cache=cache, use_model_cache=model_cache, report_dir=report_dir, features=feature)
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG)
+    end2end(task=task, use_cache=cache, use_model_cache=model_cache, report_dir=report_dir, features=feature,
+            random_seed=seed, verbose=verbose)
 
 
 if __name__ == '__main__':

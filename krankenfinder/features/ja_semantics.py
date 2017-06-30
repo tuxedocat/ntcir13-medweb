@@ -12,7 +12,7 @@ import logging
 import logging.config
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.WARNING)
 logging.captureWarnings(True)
 
 KNPFeature = Dict[str, str]
@@ -114,15 +114,17 @@ class PAS:
 class SemanticFeatures:
     """意味的素性抽出器"""
 
-    def __init__(self):
+    def __init__(self, verbose=False):
         self._knp = pyknp.KNP(jumanpp=False)
+        self.verbose = verbose
 
     def __del__(self):
         del self._knp
 
     def parse(self, s: str) -> List[Bunsetsu]:
         try:
-            logger.debug(s)
+            if self.verbose:
+                logger.debug(s)
             return self._knp.parse(s)
         except ValueError:
             logging.debug('cannnot parsed sentence {}'.format(s))
