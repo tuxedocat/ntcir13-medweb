@@ -323,7 +323,8 @@ def end2end(task: str = 'ja',
             use_cache: bool = True,
             use_model_cache: bool = True,
             cache_dir: str = None,
-            report_dir: str = None):
+            report_dir: str = None,
+            features: List[str] = None):
     """Main API"""
     project_root = pathlib.Path(os.path.dirname(os.path.abspath(__file__)) + '/../')
     if task == 'ja':
@@ -336,6 +337,9 @@ def end2end(task: str = 'ja',
         corpus = project_root / pathlib.Path('data/en_train_mini.xlsx')
     else:
         raise ValueError
+
+    _f_surface = True if 'suf-bow' in features else False
+    _f_semantic = True if 'pas' in features else False
 
     if use_cache and os.path.exists('_cache'):
         train_df = pd.read_pickle('_cache/_{}_train_df_cache.pkl.gz'.format(task))
@@ -351,7 +355,7 @@ def end2end(task: str = 'ja',
         train_df, test_df = train_test_split(df, random_seed=12345)
         pd.to_pickle(train_df, '_cache/_{}_train_df_cache.pkl.gz'.format(task))
         pd.to_pickle(test_df, '_cache/_{}_test_df_cache.pkl.gz'.format(task))
-        Xtr = feature_extraction(train_df)
+        Xtr = feature_extraction(train_df, surface=_f_surface, semantic=_f_semantic)
         Xtr = np.array(list(map(dict, Xtr)))
         ytr = get_labels(train_df)
         np.save('_cache/_{}_train_X_cache.npy'.format(task), Xtr)
@@ -381,7 +385,7 @@ def end2end(task: str = 'ja',
         Xts = np.load('_cache/_{}_test_X_cache.npy'.format(task))
         yts = np.load('_cache/_{}_test_y_cache.npy'.format(task))
     else:
-        Xts = feature_extraction(test_df)
+        Xts = feature_extraction(test_df, surface=_f_surface, semantic=_f_semantic)
         Xts = np.array(list(map(dict, Xts)))
         yts = get_labels(test_df)
         np.save('_cache/_{}_test_X_cache.npy'.format(task), Xts)
@@ -397,7 +401,7 @@ def end2end(task: str = 'ja',
         _report_dir = project_root / pathlib.Path('reports')
 
     if not _report_dir.exists():
-        _report_dir.mkdir()
+        _report_dir.mkdir(exist_ok=True)
 
     report_df = error_analysis(test_df, predictions, rfcv_model)
     analysis_fn = _report_dir / pathlib.Path('analysis')
@@ -420,8 +424,10 @@ def end2end(task: str = 'ja',
 @click.option('--model-cache', is_flag=True, default=False)
 @click.option('--cache-dir', type=str, default='.')
 @click.option('--report-dir', type=str, default='../reports')
-def cli(task, cache, model_cache, cache_dir, report_dir):
-    end2end(task, cache, model_cache)
+@click.option('--feature', '-f', type=str, multiple=True, help='eg. -f pas -f suf-bow')
+def cli(task, cache, model_cache, cache_dir, report_dir, feature):
+    print(feature)
+    end2end(task=task, use_cache=cache, use_model_cache=model_cache, report_dir=report_dir, features=feature)
 
 
 if __name__ == '__main__':
