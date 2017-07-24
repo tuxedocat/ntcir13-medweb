@@ -346,9 +346,9 @@ def end2end(task: str = 'ja',
 
     project_root = Path(os.path.dirname(os.path.abspath(__file__)) + '/../')
     if task == 'ja':
-        corpus = project_root / Path('data/ja_train_20170501.xlsx')
+        corpus = project_root / Path('data/ja_train_20170705.xlsx')
     elif task == 'en':
-        corpus = project_root / Path('data/en_train_20170501.xlsx')
+        corpus = project_root / Path('data/en_train_20170705.xlsx')
     elif task == 'ja-dev':
         corpus = project_root / Path('data/ja_train_mini.xlsx')
     elif task == 'en-dev':
@@ -356,7 +356,7 @@ def end2end(task: str = 'ja',
     else:
         raise ValueError
 
-    _f_surface = True if 'suf-bow' in features else False
+    _f_surface = True if 'suf' in features else False
     _f_semantic = True if 'pas' in features else False
 
     if report_dir:
@@ -455,7 +455,7 @@ def end2end(task: str = 'ja',
 @click.option('--model-cache', is_flag=True, default=False)
 @click.option('--cache-dir', type=str, default='.')
 @click.option('--report-dir', type=str, default='../reports')
-@click.option('--feature', '-f', type=str, multiple=True, help='eg. -f pas -f suf-bow')
+@click.option('--feature', '-f', type=str, multiple=True, help='eg. -f pas -f suf')
 @click.option('--verbose', '-v', is_flag=True, default=False)
 @click.option('--seed', type=int, help='random seed which is used for train/test split')
 def cli(task, cache, model_cache, cache_dir, report_dir, feature, seed, verbose):
