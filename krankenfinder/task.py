@@ -314,6 +314,17 @@ def error_analysis(df_test: pd.DataFrame, predictions: np.array, model: Model) -
     return df[_columns]
 
 
+def make_submission(df_test: pd.DataFrame, predictions: np.array) -> pd.DataFrame:
+    """Format outputs for submission"""
+    _columns = ['ID', 'Tweet'] + LABELCOLS
+    df = df_test.loc[:, _columns].copy()
+    for i, colname in enumerate(LABELCOLS):
+        preds = pd.Series(predictions[:, i], index=df['ID'], dtype=bool)
+        df[colname] = preds.values
+        df[colname] = df[colname].apply(lambda s: 'p' if s is True else 'n')
+    return df[_columns]
+
+
 def get_interpretation_of_model(model: Model, transformer: DictVectorizer) -> pd.DataFrame:
     try:
         f_importances = model.feature_importances_
@@ -424,7 +435,9 @@ def end2end(task: str = 'ja',
     print(report)
 
     report_df = error_analysis(test_df, predictions, rfcv_model)
+    submission_df = make_submission(test_df, predictions)
     result_fn = _report_dir / Path('result.log')
+    submission_fn = report_dir / Path('submission.csv')
     analysis_fn = _report_dir / Path('analysis')
     modelreport_fn = _report_dir / Path('feature_importance')
 
@@ -441,6 +454,8 @@ def end2end(task: str = 'ja',
     # Pandas doesn't work properly with Path obj., conversion to string is workaround.
     report_df.to_csv(str(analysis_fn.with_suffix('.csv')), index=False)
     report_df.to_excel(str(analysis_fn.with_suffix('.xlsx')), sheet_name='result', index=False)
+
+    submission_df.to_csv(str(submission_fn), index=False)
 
     model_interpretation = get_interpretation_of_model(rfcv_model, vectorizer)
     model_interpretation.to_csv(str(modelreport_fn.with_suffix('.csv')))
