@@ -62,13 +62,22 @@ def load_dataset(corpus_path: Path) -> Optional[pd.DataFrame]:
     :return:
     :rtype:
     """
-    if str(corpus_path.suffix == '.xlsx'):
-        if corpus_path.name.startswith('ja'):
-            raw = pd.read_excel(str(corpus_path), sheetname='ja_train')
-        elif corpus_path.name.startswith('en'):
-            raw = pd.read_excel(str(corpus_path), sheetname='en_train')
+
+    def get_sheetname(p: Path) -> str:
+        if p.name.startswith('ja_train'):
+            return 'ja_train'
+        elif p.name.startswith('ja_test'):
+            return 'ja_test'
+        elif p.name.startswith('en_train'):
+            return 'en_train'
+        elif p.name.startswith('en_test'):
+            return 'en_test'
         else:
-            raise ValueError('Invalid format corpus file: {}'.format(str(corpus_path.absolute())))
+            return ''
+
+    if str(corpus_path.suffix == '.xlsx'):
+        sheetname = get_sheetname(corpus_path)
+        raw = pd.read_excel(str(corpus_path), sheetname=sheetname)
     else:
         raise NotImplementedError('Only xlsx corpus is allowed.')
 
@@ -347,7 +356,8 @@ def end2end(task: str = 'ja',
             report_dir: str = None,
             features: List[str] = None,
             random_seed: int = None,
-            verbose: bool = False):
+            verbose: bool = False,
+            formal_run: bool = False):
     """Main API"""
     logging.captureWarnings(True)
     if verbose:
@@ -366,6 +376,13 @@ def end2end(task: str = 'ja',
         corpus = project_root / Path('data/en_train_mini.xlsx')
     else:
         raise ValueError
+
+    if formal_run and task == 'ja':
+        test_corpus = project_root / Path('data/ja_test_20170724.xlsx')
+    elif formal_run and task == 'en':
+        test_corpus = project_root / Path('data/en_test_20170724.xlsx')
+    else:
+        test_corpus = None
 
     _f_surface = True if 'suf' in features else False
     _f_semantic = True if 'pas' in features else False
@@ -390,7 +407,13 @@ def end2end(task: str = 'ja',
     else:
         df = load_dataset(corpus)
         df = preprocess_df(df)
-        train_df, test_df = train_test_split(df, random_seed=random_seed)
+        if not formal_run:
+            train_df, test_df = train_test_split(df, random_seed=random_seed)
+        else:
+            train_df = df
+            test_df = load_dataset(test_corpus)
+            test_df = preprocess_df(test_df)
+
         pd.to_pickle(train_df, get_fn(cache_dir, task + '_train', '.pkl.gz'))
         pd.to_pickle(test_df, get_fn(cache_dir, task + '_test', '.pkl.gz'))
         Xtr = feature_extraction(train_df, surface=_f_surface, semantic=_f_semantic, verbose=verbose)
@@ -431,41 +454,47 @@ def end2end(task: str = 'ja',
         np.save(get_fn(cache_dir, task + '_ytest', '.npy'), yts)
 
     Xts = vectorizer.transform(Xts)
-    report, predictions = evaluate_on_testset(rfcv_model, Xts, yts)
-    print(report)
 
-    report_df = error_analysis(test_df, predictions, rfcv_model)
+    if not formal_run:
+        report, predictions = evaluate_on_testset(rfcv_model, Xts, yts)
+        print(report)
+
+        report_df = error_analysis(test_df, predictions, rfcv_model)
+        result_fn = _report_dir / Path('result.log')
+        analysis_fn = _report_dir / Path('analysis')
+        with result_fn.open('w') as log:
+            log.write(report)
+            log.write('\n\n')
+            log.write('seed={}\n'.format(random_seed))
+            log.write('features={}\n'.format(features))
+            try:
+                log.write('model={}\n'.format(rfcv_model.best_estimator_))
+            except AttributeError:
+                log.write('model={}\n'.format(rfcv_model))
+
+        # Pandas doesn't work properly with Path obj., conversion to string is workaround.
+        report_df.to_csv(str(analysis_fn.with_suffix('.csv')), index=False, encoding='utf-8-sig')
+        report_df.to_excel(str(analysis_fn.with_suffix('.xlsx')), sheet_name='result', index=False,
+                           encoding='utf-8-sig')
+    else:
+        predictions = rfcv_model.predict(Xts)
+
     submission_df = make_submission(test_df, predictions)
-    result_fn = _report_dir / Path('result.log')
-    submission_fn = report_dir / Path('submission.csv')
-    analysis_fn = _report_dir / Path('analysis')
+    submission_fn = report_dir / Path('submission')
+    submission_df.to_csv(str(submission_fn.with_suffix('.csv')), index=False, encoding='utf-8-sig')
+    submission_df.to_excel(str(submission_fn.with_suffix('.xlsx')), index=False, encoding='utf-8-sig')
+
     modelreport_fn = _report_dir / Path('feature_importance')
-
-    with result_fn.open('w') as log:
-        log.write(report)
-        log.write('\n\n')
-        log.write('seed={}\n'.format(random_seed))
-        log.write('features={}\n'.format(features))
-        try:
-            log.write('model={}\n'.format(rfcv_model.best_estimator_))
-        except AttributeError:
-            log.write('model={}\n'.format(rfcv_model))
-
-    # Pandas doesn't work properly with Path obj., conversion to string is workaround.
-    report_df.to_csv(str(analysis_fn.with_suffix('.csv')), index=False)
-    report_df.to_excel(str(analysis_fn.with_suffix('.xlsx')), sheet_name='result', index=False)
-
-    submission_df.to_csv(str(submission_fn), index=False)
-
     model_interpretation = get_interpretation_of_model(rfcv_model, vectorizer)
-    model_interpretation.to_csv(str(modelreport_fn.with_suffix('.csv')))
-    model_interpretation.to_excel(str(modelreport_fn.with_suffix('.xlsx')), sheet_name='features')
+    model_interpretation.to_csv(str(modelreport_fn.with_suffix('.csv')), encoding='utf-8-sig')
+    model_interpretation.to_excel(str(modelreport_fn.with_suffix('.xlsx')), sheet_name='features', encoding='utf-8-sig')
 
     logger.info('All done.')
 
 
 @click.command()
 @click.argument('task', type=str)
+@click.option('--formal-run', is_flag=True, default=False)
 @click.option('--cache', is_flag=True, default=False)
 @click.option('--model-cache', is_flag=True, default=False)
 @click.option('--cache-dir', type=str, default='.')
@@ -473,10 +502,10 @@ def end2end(task: str = 'ja',
 @click.option('--feature', '-f', type=str, multiple=True, help='eg. -f pas -f suf')
 @click.option('--verbose', '-v', is_flag=True, default=False)
 @click.option('--seed', type=int, help='random seed which is used for train/test split')
-def cli(task, cache, model_cache, cache_dir, report_dir, feature, seed, verbose):
+def cli(task, cache, model_cache, cache_dir, report_dir, feature, seed, verbose, formal_run):
     print(feature)
     end2end(task=task, use_cache=cache, use_model_cache=model_cache, report_dir=report_dir, features=feature,
-            random_seed=seed, verbose=verbose)
+            random_seed=seed, verbose=verbose, formal_run=formal_run)
 
 
 if __name__ == '__main__':
