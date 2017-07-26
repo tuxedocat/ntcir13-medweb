@@ -38,9 +38,9 @@ logging.basicConfig(level=logging.INFO)
 logging.captureWarnings(True)
 
 try:
-    NEOLOGD = os.environ['NEOLOGD']
+    NEOLOGD_OPT = '-d {}'.format(os.environ['NEOLOGD'])
 except KeyError:
-    NEOLOGD = '/usr/lib/mecab/dic/mecab-ipadic-neologd/'
+    NEOLOGD_OPT = '-d /usr/lib/mecab/dic/mecab-ipadic-neologd/'
 
 LABELCOLS = ['Influenza', 'Diarrhea', 'Hayfever', 'Cough', 'Headache', 'Fever', 'Runnynose', 'Cold']
 Model = Union[RandomForestClassifier, RandomizedSearchCV]
@@ -113,8 +113,12 @@ def _binarize_pn(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _pp_ja(df: pd.DataFrame) -> pd.DataFrame:
-    mecab = MeCab('-d {}'.format(NEOLOGD))
+def _pp_ja(df: pd.DataFrame, userdict: str = None) -> pd.DataFrame:
+    if userdict:
+        mecab = MeCab('{} -u {}'.format(NEOLOGD_OPT, userdict))
+        logger.info('Using customdict {}'.format(userdict))
+    else:
+        mecab = MeCab('{}'.format(NEOLOGD_OPT))
     parser = _parser_func_mecab(mecab)
     df['words'] = df['Tweet'].apply(parser)
     # df['raw'] = df['Tweet'].apply(normalize_neologd) # KNP fails to parse with some hankaku characters
@@ -135,10 +139,12 @@ def _check_lang(df: pd.DataFrame) -> str:
     return df['ID'].iloc[0][-2:]
 
 
-def preprocess_df(df: pd.DataFrame) -> pd.DataFrame:
+def preprocess_df(df: pd.DataFrame, userdict: str = None) -> pd.DataFrame:
     """Perform preprocessing for given dataframe,
     including, binarizing p/n labels to 1/0, normalization (JP), adding column of tokenized sentence.
 
+    :param userdict:
+    :type userdict:
     :param df:
     :type df:
     :return:
@@ -147,7 +153,7 @@ def preprocess_df(df: pd.DataFrame) -> pd.DataFrame:
     df = _binarize_pn(df)
 
     if _check_lang(df) == 'ja':
-        df = _pp_ja(df)
+        df = _pp_ja(df, userdict=userdict)
     elif _check_lang(df) == 'en':
         df = _pp_en(df)
     else:
@@ -387,6 +393,11 @@ def end2end(task: str = 'ja',
     _f_surface = True if 'suf' in features else False
     _f_semantic = True if 'pas' in features else False
 
+    if 'userdict' in features:
+        _userdict = str(project_root / Path('mecab-dict/cat.dic'))
+    else:
+        _userdict = None
+
     if report_dir:
         _report_dir = Path(report_dir)
     else:
@@ -406,13 +417,13 @@ def end2end(task: str = 'ja',
         ytr = np.load(get_fn(cache_dir, task + '_ytrain', '.npy'))
     else:
         df = load_dataset(corpus)
-        df = preprocess_df(df)
+        df = preprocess_df(df, userdict=_userdict)
         if not formal_run:
             train_df, test_df = train_test_split(df, random_seed=random_seed)
         else:
             train_df = df
             test_df = load_dataset(test_corpus)
-            test_df = preprocess_df(test_df)
+            test_df = preprocess_df(test_df, userdict=_userdict)
 
         pd.to_pickle(train_df, get_fn(cache_dir, task + '_train', '.pkl.gz'))
         pd.to_pickle(test_df, get_fn(cache_dir, task + '_test', '.pkl.gz'))
@@ -499,7 +510,7 @@ def end2end(task: str = 'ja',
 @click.option('--model-cache', is_flag=True, default=False)
 @click.option('--cache-dir', type=str, default='.')
 @click.option('--report-dir', type=str, default='../reports')
-@click.option('--feature', '-f', type=str, multiple=True, help='eg. -f pas -f suf')
+@click.option('--feature', '-f', type=str, multiple=True, help='eg. -f pas -f suf -f userdict')
 @click.option('--verbose', '-v', is_flag=True, default=False)
 @click.option('--seed', type=int, help='random seed which is used for train/test split')
 def cli(task, cache, model_cache, cache_dir, report_dir, feature, seed, verbose, formal_run):
