@@ -33,9 +33,11 @@ from krankenfinder.utils.normalize import normalize_neologd
 import logging
 import logging.config
 
+# This logger will be overridden by logger defined in __main__
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 logging.captureWarnings(True)
+logger.propagate = False
 
 try:
     NEOLOGD_OPT = '-d {}'.format(os.environ['NEOLOGD'])
@@ -189,8 +191,6 @@ def add_surface_feature(df: pd.DataFrame) -> pd.DataFrame:
     def get_counts_of_words(l: List[str]) -> List[Tuple[str, int]]:
         return list(Counter(l).items())
 
-    logger = logging.getLogger(__name__)
-
     df['f_surface'] = df['words'].apply(get_counts_of_words)
     logger.info('Extracted word-surface features')
     return df
@@ -273,7 +273,8 @@ def define_model() -> Model:
                                               param_distributions=search_space,
                                               n_iter=100,
                                               n_jobs=8,
-                                              cv=5
+                                              cv=5,
+                                              verbose=1
                                               )
     return rfcv
 
@@ -358,18 +359,27 @@ def get_fn(dirpath: Path, name: str, ext: str) -> str:
 def end2end(task: str = 'ja',
             use_cache: bool = True,
             use_model_cache: bool = True,
-            cache_dir: str = None,
             report_dir: str = None,
             features: List[str] = None,
             random_seed: int = None,
             verbose: bool = False,
             formal_run: bool = False):
     """Main API"""
-    logging.captureWarnings(True)
+
+    # Setup logger
+    global logger
+    logger = logging.getLogger(__name__)
+    handler = logging.StreamHandler()
+    logger.propagate = False
+
     if verbose:
-        logging.basicConfig(level=logging.DEBUG)
+        handler.setLevel(logging.DEBUG)
+        logger.setLevel(logging.DEBUG)
     else:
-        logging.basicConfig(level=logging.INFO)
+        handler.setLevel(logging.INFO)
+        logger.setLevel(logging.INFO)
+
+    logger.addHandler(handler)
 
     project_root = Path(os.path.dirname(os.path.abspath(__file__)) + '/../')
     if task == 'ja':
@@ -468,7 +478,9 @@ def end2end(task: str = 'ja',
 
     if not formal_run:
         report, predictions = evaluate_on_testset(rfcv_model, Xts, yts)
+        print()
         print(report)
+        print()
 
         report_df = error_analysis(test_df, predictions, rfcv_model)
         result_fn = _report_dir / Path('result.log')
@@ -508,13 +520,12 @@ def end2end(task: str = 'ja',
 @click.option('--formal-run', is_flag=True, default=False)
 @click.option('--cache', is_flag=True, default=False)
 @click.option('--model-cache', is_flag=True, default=False)
-@click.option('--cache-dir', type=str, default='.')
 @click.option('--report-dir', type=str, default='../reports')
 @click.option('--feature', '-f', type=str, multiple=True, help='eg. -f pas -f suf -f userdict')
 @click.option('--verbose', '-v', is_flag=True, default=False)
 @click.option('--seed', type=int, help='random seed which is used for train/test split')
-def cli(task, cache, model_cache, cache_dir, report_dir, feature, seed, verbose, formal_run):
-    print(feature)
+def cli(task, cache, model_cache, report_dir, feature, seed, verbose, formal_run):
+    print('Features: {}'.format(feature))
     end2end(task=task, use_cache=cache, use_model_cache=model_cache, report_dir=report_dir, features=feature,
             random_seed=seed, verbose=verbose, formal_run=formal_run)
 
