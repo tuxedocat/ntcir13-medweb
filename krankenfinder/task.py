@@ -40,17 +40,16 @@ logging.captureWarnings(True)
 logger.propagate = False
 
 try:
-    NEOLOGD_OPT = '-d {}'.format(os.environ['NEOLOGD'])
+    MECAB_OPTS = "-F %m,%f[0],%f[6] -d {}".format(os.environ['NEOLOGD'])
 except KeyError:
-    NEOLOGD_OPT = '-d /usr/lib/mecab/dic/mecab-ipadic-neologd/'
+    MECAB_OPTS = "-F %m,%f[0],%f[6] -d /usr/lib/mecab/dic/mecab-ipadic-neologd/"
 
 LABELCOLS = ['Influenza', 'Diarrhea', 'Hayfever', 'Cough', 'Headache', 'Fever', 'Runnynose', 'Cold']
 Model = Union[RandomForestClassifier, RandomizedSearchCV]
 
 
 class ModelDefinition:
-    def __init__(self, model: Model,
-                 dv: DictVectorizer, comment: str = None) -> None:
+    def __init__(self, model: Model, dv: DictVectorizer, comment: str = None) -> None:
         self.model = model
         self.dv = dv
         self.comments = comment if comment else ''
@@ -94,9 +93,22 @@ def _parser_func_mecab_detailed(parser: MeCab) -> Callable[[str], List[Tuple[str
     return parse_to_morphs
 
 
+def _get_lemma(node: MeCabNode) -> str:
+    """Assuming format "<surface>,<pos>,<lemma>"
+
+    :param node:
+    :return:
+    """
+    try:
+        return node.feature.split(',')[2]
+    except IndexError:
+        logger.error(node.feature)
+        return ''
+
+
 def _parser_func_mecab(parser: MeCab) -> Callable[[str], List[str]]:
     def parse_to_surf(s: str) -> List[str]:
-        return [node.surface for node in parser.parse(normalize_neologd(s), as_nodes=True) if node.surface]
+        return [_get_lemma(node) for node in parser.parse(normalize_neologd(s), as_nodes=True) if node.is_nor()]
 
     return parse_to_surf
 
@@ -117,10 +129,10 @@ def _binarize_pn(df: pd.DataFrame) -> pd.DataFrame:
 
 def _pp_ja(df: pd.DataFrame, userdict: str = None) -> pd.DataFrame:
     if userdict:
-        mecab = MeCab('{} -u {}'.format(NEOLOGD_OPT, userdict))
+        mecab = MeCab('{} -u {}'.format(MECAB_OPTS, userdict))
         logger.info('Using customdict {}'.format(userdict))
     else:
-        mecab = MeCab('{}'.format(NEOLOGD_OPT))
+        mecab = MeCab('{}'.format(MECAB_OPTS))
     parser = _parser_func_mecab(mecab)
     df['words'] = df['Tweet'].apply(parser)
     # df['raw'] = df['Tweet'].apply(normalize_neologd) # KNP fails to parse with some hankaku characters
