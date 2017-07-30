@@ -21,12 +21,14 @@ from sklearn import preprocessing
 from sklearn.feature_extraction import DictVectorizer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn import metrics
+from sklearn.externals import joblib
 import sklearn.utils
 
 import pyknp
 from natto import MeCab, MeCabNode
 import spacy
 
+from features.basics import ngram_features
 from krankenfinder.features.ja_semantics import SemanticFeatures
 from krankenfinder.utils.normalize import normalize_neologd
 
@@ -208,6 +210,13 @@ def add_surface_feature(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def add_ngram_feature(df: pd.DataFrame, n: int = 3) -> pd.DataFrame:
+    ngram_func = functools.partial(ngram_features, n=n, padding=True)
+    df['f_{}gram'.format(n)] = df['words'].apply(ngram_func)
+    logger.info('Extracted {}gram features'.format(n))
+    return df
+
+
 def add_semantic_feature(df: pd.DataFrame, verbose=False) -> pd.DataFrame:
     """Add semantic feature column to given dataframe
 
@@ -249,11 +258,18 @@ def _merge_feature_columns(df: pd.DataFrame) -> pd.DataFrame:
         _merge_feature_columns(df)
 
 
-def feature_extraction(df: pd.DataFrame, surface=True, semantic=True, verbose=False) -> np.array:
+def feature_extraction(df: pd.DataFrame,
+                       surface=True,
+                       ngram_n: Union[Tuple[int], Tuple[int, int], None] = (3,),
+                       semantic=True,
+                       verbose=False) -> np.array:
     # use deepcopy instead of df.copy() because it doesn't recursively copy objects even when deep=True.
     df = deepcopy(df)
     if surface:
         df = add_surface_feature(df)
+        if ngram_n:
+            for n in ngram_n:
+                df = add_ngram_feature(df, n=n)
 
     if semantic:
         lang = _check_lang(df)
@@ -281,10 +297,11 @@ def define_model() -> Model:
         max_depth=list(range(8, 25, 2))
     )
 
+    ncores = joblib.cpu_count() // 2  # ... be nice.
     rfcv = model_selection.RandomizedSearchCV(estimator=rf,
                                               param_distributions=search_space,
                                               n_iter=100,
-                                              n_jobs=8,
+                                              n_jobs=ncores,
                                               cv=5,
                                               verbose=1
                                               )
@@ -393,6 +410,7 @@ def end2end(task: str = 'ja',
 
     logger.addHandler(handler)
 
+    # Input dirs and files
     project_root = Path(os.path.dirname(os.path.abspath(__file__)) + '/../')
     if task == 'ja':
         corpus = project_root / Path('data/ja_train_20170705.xlsx')
@@ -412,14 +430,22 @@ def end2end(task: str = 'ja',
     else:
         test_corpus = None
 
+    # Feature flags
     _f_surface = True if 'suf' in features else False
     _f_semantic = True if 'pas' in features else False
+    _ns = []
+    if 'bigram' in features:
+        _ns.append(2)
+    if 'trigram' in features:
+        _ns.append(3)
+    _ns = tuple(_ns)
 
     if 'userdict' in features:
         _userdict = str(project_root / Path('mecab-dict/cat.dic'))
     else:
         _userdict = None
 
+    # Output dirs
     if report_dir:
         _report_dir = Path(report_dir)
     else:
@@ -432,6 +458,7 @@ def end2end(task: str = 'ja',
     if not cache_dir.exists():
         cache_dir.mkdir(exist_ok=True)
 
+    # Preprocessing
     if use_cache and cache_dir.exists():
         train_df = pd.read_pickle(get_fn(cache_dir, task + '_train', '.pkl.gz'))
         test_df = pd.read_pickle(get_fn(cache_dir, task + '_test', '.pkl.gz'))
@@ -449,7 +476,7 @@ def end2end(task: str = 'ja',
 
         pd.to_pickle(train_df, get_fn(cache_dir, task + '_train', '.pkl.gz'))
         pd.to_pickle(test_df, get_fn(cache_dir, task + '_test', '.pkl.gz'))
-        Xtr = feature_extraction(train_df, surface=_f_surface, semantic=_f_semantic, verbose=verbose)
+        Xtr = feature_extraction(train_df, surface=_f_surface, semantic=_f_semantic, ngram_n=_ns, verbose=verbose)
         Xtr = np.array(list(map(dict, Xtr)))
         ytr = get_labels(train_df)
         np.save(get_fn(cache_dir, task + '_Xtrain', '.npy'), Xtr)
@@ -459,8 +486,8 @@ def end2end(task: str = 'ja',
 
     # Transform to BoW representation
     Xtr = vectorizer.fit_transform(Xtr)
-    logger.info('Extracted features')
 
+    # Training the model
     if use_model_cache:
         with open(get_fn(cache_dir, 'model', '.pkl'), 'rb') as f:
             rfcv_model = pickle.load(f)
@@ -480,7 +507,7 @@ def end2end(task: str = 'ja',
         Xts = np.load(get_fn(cache_dir, task + '_Xtest', '.npy'))
         yts = np.load(get_fn(cache_dir, task + '_ytest', '.npy'))
     else:
-        Xts = feature_extraction(test_df, surface=_f_surface, semantic=_f_semantic, verbose=verbose)
+        Xts = feature_extraction(test_df, surface=_f_surface, semantic=_f_semantic, ngram_n=_ns, verbose=verbose)
         Xts = np.array(list(map(dict, Xts)))
         yts = get_labels(test_df)
         np.save(get_fn(cache_dir, task + '_Xtest', '.npy'), Xts)
