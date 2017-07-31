@@ -19,7 +19,7 @@ from sklearn import model_selection
 from sklearn.model_selection import RandomizedSearchCV
 from sklearn import preprocessing
 from sklearn.feature_extraction import DictVectorizer
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, ExtraTreesClassifier, GradientBoostingClassifier
 from sklearn import metrics
 from sklearn.externals import joblib
 import sklearn.utils
@@ -303,11 +303,15 @@ def get_labels(df: pd.DataFrame) -> np.array:
 def define_model(n_random_search: int = 100) -> Model:
     # TODO: needs refinements
     rf = RandomForestClassifier(random_state=None)
-    _max_depth = list(range(8, 25, 2))
+    # Or Extremely Randomized Trees, but currently no big difference in terms of performance.
+    # rf = ExtraTreesClassifier(random_state=None)
+    _n_estimators = list(range(8, 64, 4))
+    _n_estimators += [100, 250, 500, 1000, 2000]
+    _max_depth = list(range(8, 24, 2))
     _max_depth.append(None)
 
     search_space = dict(
-        n_estimators=list(range(8, 48, 2)),
+        n_estimators=_n_estimators,
         criterion=['gini', 'entropy'],
         max_features=['auto', 'log2', None],
         max_depth=_max_depth
