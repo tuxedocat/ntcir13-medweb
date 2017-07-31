@@ -42,9 +42,9 @@ logging.captureWarnings(True)
 logger.propagate = False
 
 try:
-    MECAB_OPTS = "-F %m,%f[0],%f[6] -d {}".format(os.environ['NEOLOGD'])
+    MECAB_OPTS = "-F %m,%f[0],%f[1],%f[6] -d {}".format(os.environ['NEOLOGD'])
 except KeyError:
-    MECAB_OPTS = "-F %m,%f[0],%f[6] -d /usr/lib/mecab/dic/mecab-ipadic-neologd/"
+    MECAB_OPTS = "-F %m,%f[0],%f[1],%f[6] -d /usr/lib/mecab/dic/mecab-ipadic-neologd/"
 
 LABELCOLS = ['Influenza', 'Diarrhea', 'Hayfever', 'Cough', 'Headache', 'Fever', 'Runnynose', 'Cold']
 Model = Union[RandomForestClassifier, RandomizedSearchCV]
@@ -96,21 +96,35 @@ def _parser_func_mecab_detailed(parser: MeCab) -> Callable[[str], List[Tuple[str
 
 
 def _get_lemma(node: MeCabNode) -> str:
-    """Assuming format "<surface>,<pos>,<lemma>"
+    """Assuming format "<surface>,<pos>,<posd>,<lemma>"
 
     :param node:
     :return:
     """
     try:
-        return node.feature.split(',')[2]
+        return node.feature.split(',')[3]
     except IndexError:
         logger.error(node.feature)
         return ''
 
 
+def _pos_included(node: MeCabNode) -> bool:
+    exclude_pos = {'記号'}
+    exclude_posd = {'格助詞', '接続助詞'}
+    suf, pos, posd, lemma = node.feature.split(',')
+    if pos in exclude_pos:
+        return False
+    if posd in exclude_posd:
+        return False
+    return True
+
+
 def _parser_func_mecab(parser: MeCab) -> Callable[[str], List[str]]:
     def parse_to_surf(s: str) -> List[str]:
-        return [_get_lemma(node) for node in parser.parse(normalize_neologd(s), as_nodes=True) if node.is_nor()]
+        # return [_get_lemma(node) for node in parser.parse(normalize_neologd(s), as_nodes=True)
+        #         if node.is_nor()]
+        return [_get_lemma(node) for node in parser.parse(normalize_neologd(s), as_nodes=True)
+                if node.is_nor() and _pos_included(node)]
 
     return parse_to_surf
 
