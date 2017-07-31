@@ -286,21 +286,23 @@ def get_labels(df: pd.DataFrame) -> np.array:
     return df[LABELCOLS].values
 
 
-def define_model() -> Model:
+def define_model(n_random_search: int = 100) -> Model:
     # TODO: needs refinements
     rf = RandomForestClassifier(random_state=None)
+    _max_depth = list(range(8, 25, 2))
+    _max_depth.append(None)
 
     search_space = dict(
-        n_estimators=[10, 16, 20, 24, 28, 32, 36, 40],
+        n_estimators=list(range(8, 48, 2)),
         criterion=['gini', 'entropy'],
         max_features=['auto', 'log2', None],
-        max_depth=list(range(8, 25, 2))
+        max_depth=_max_depth
     )
 
     ncores = joblib.cpu_count() // 2  # ... be nice.
     rfcv = model_selection.RandomizedSearchCV(estimator=rf,
                                               param_distributions=search_space,
-                                              n_iter=100,
+                                              n_iter=n_random_search,
                                               n_jobs=ncores,
                                               cv=5,
                                               verbose=1
@@ -392,7 +394,8 @@ def end2end(task: str = 'ja',
             features: List[str] = None,
             random_seed: int = None,
             verbose: bool = False,
-            formal_run: bool = False):
+            formal_run: bool = False,
+            n_random_search: int = 100):
     """Main API"""
 
     # Setup logger
@@ -493,7 +496,7 @@ def end2end(task: str = 'ja',
             rfcv_model = pickle.load(f)
     else:
         # Train model using randomized CV
-        rfcv_model = define_model()
+        rfcv_model = define_model(n_random_search=n_random_search)
         logger.info('Training model...')
         rfcv_model.fit(Xtr, ytr)
         logger.info('Training model... Done.')
@@ -563,10 +566,11 @@ def end2end(task: str = 'ja',
 @click.option('--feature', '-f', type=str, multiple=True, help='eg. -f pas -f suf -f userdict')
 @click.option('--verbose', '-v', is_flag=True, default=False)
 @click.option('--seed', type=int, help='random seed which is used for train/test split')
-def cli(task, cache, model_cache, report_dir, feature, seed, verbose, formal_run):
+@click.option('--random-search', type=int, default=100, help='number of iteration of random-parameter-search')
+def cli(task, cache, model_cache, report_dir, feature, seed, verbose, formal_run, random_search):
     print('Features: {}'.format(feature))
     end2end(task=task, use_cache=cache, use_model_cache=model_cache, report_dir=report_dir, features=feature,
-            random_seed=seed, verbose=verbose, formal_run=formal_run)
+            random_seed=seed, verbose=verbose, formal_run=formal_run, n_random_search=random_search)
 
 
 if __name__ == '__main__':
