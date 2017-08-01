@@ -30,6 +30,7 @@ import spacy
 
 from features.basics import ngram_features
 from krankenfinder.features.ja_semantics import SemanticFeatures
+from krankenfinder.features import bow_juman
 from krankenfinder.utils.normalize import normalize_neologd
 
 import logging
@@ -121,8 +122,6 @@ def _pos_included(node: MeCabNode) -> bool:
 
 def _parser_func_mecab(parser: MeCab) -> Callable[[str], List[str]]:
     def parse_to_surf(s: str) -> List[str]:
-        # return [_get_lemma(node) for node in parser.parse(normalize_neologd(s), as_nodes=True)
-        #         if node.is_nor()]
         return [_get_lemma(node) for node in parser.parse(normalize_neologd(s), as_nodes=True)
                 if node.is_nor() and _pos_included(node)]
 
@@ -143,15 +142,20 @@ def _binarize_pn(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _pp_ja(df: pd.DataFrame, userdict: str = None) -> pd.DataFrame:
-    if userdict:
-        mecab = MeCab('{} -u {}'.format(MECAB_OPTS, userdict))
-        logger.info('Using customdict {}'.format(userdict))
-    else:
-        mecab = MeCab('{}'.format(MECAB_OPTS))
-    parser = _parser_func_mecab(mecab)
+def _pp_ja(df: pd.DataFrame, userdict: str = None, jumanpp: bool = False) -> pd.DataFrame:
+    if not jumanpp:  # use mecab-neologd by default
+        if userdict:
+            mecab = MeCab('{} -u {}'.format(MECAB_OPTS, userdict))
+            logger.info('Using customdict {}'.format(userdict))
+        else:
+            mecab = MeCab('{}'.format(MECAB_OPTS))
+        parser = _parser_func_mecab(mecab)
+        # df['raw'] = df['Tweet'].apply(normalize_neologd) # KNP fails to parse with some hankaku characters
+    else:  # use jumanpp
+        parser = bow_juman.parser_func_jumanpp(lemmatize=True)
+        logger.info('Using Juman++ instead of MeCab')
+
     df['words'] = df['Tweet'].apply(parser)
-    # df['raw'] = df['Tweet'].apply(normalize_neologd) # KNP fails to parse with some hankaku characters
     df['raw'] = df['Tweet'].copy()  # TODO: add some preprocess for KNP
     return df
 
@@ -169,7 +173,7 @@ def _check_lang(df: pd.DataFrame) -> str:
     return df['ID'].iloc[0][-2:]
 
 
-def preprocess_df(df: pd.DataFrame, userdict: str = None) -> pd.DataFrame:
+def preprocess_df(df: pd.DataFrame, userdict: str = None, jumanpp: bool = False) -> pd.DataFrame:
     """Perform preprocessing for given dataframe,
     including, binarizing p/n labels to 1/0, normalization (JP), adding column of tokenized sentence.
 
@@ -183,7 +187,7 @@ def preprocess_df(df: pd.DataFrame, userdict: str = None) -> pd.DataFrame:
     df = _binarize_pn(df)
 
     if _check_lang(df) == 'ja':
-        df = _pp_ja(df, userdict=userdict)
+        df = _pp_ja(df, userdict=userdict, jumanpp=jumanpp)
     elif _check_lang(df) == 'en':
         df = _pp_en(df)
     else:
@@ -413,7 +417,8 @@ def end2end(task: str = 'ja',
             random_seed: int = None,
             verbose: bool = False,
             formal_run: bool = False,
-            n_random_search: int = 100):
+            n_random_search: int = 100,
+            use_jumanpp: bool = False):
     """Main API"""
 
     # Setup logger
@@ -487,13 +492,13 @@ def end2end(task: str = 'ja',
         ytr = np.load(get_fn(cache_dir, task + '_ytrain', '.npy'))
     else:
         df = load_dataset(corpus)
-        df = preprocess_df(df, userdict=_userdict)
+        df = preprocess_df(df, userdict=_userdict, jumanpp=use_jumanpp)
         if not formal_run:
             train_df, test_df = train_test_split(df, random_seed=random_seed)
         else:
             train_df = df
             test_df = load_dataset(test_corpus)
-            test_df = preprocess_df(test_df, userdict=_userdict)
+            test_df = preprocess_df(test_df, userdict=_userdict, jumanpp=use_jumanpp)
 
         pd.to_pickle(train_df, get_fn(cache_dir, task + '_train', '.pkl.gz'))
         pd.to_pickle(test_df, get_fn(cache_dir, task + '_test', '.pkl.gz'))
@@ -585,10 +590,12 @@ def end2end(task: str = 'ja',
 @click.option('--verbose', '-v', is_flag=True, default=False)
 @click.option('--seed', type=int, help='random seed which is used for train/test split')
 @click.option('--random-search', type=int, default=100, help='number of iteration of random-parameter-search')
-def cli(task, cache, model_cache, report_dir, feature, seed, verbose, formal_run, random_search):
+@click.option('--jumanpp', is_flag=True, default=False)
+def cli(task, cache, model_cache, report_dir, feature, seed, verbose, formal_run, random_search, jumanpp):
     print('Features: {}'.format(feature))
     end2end(task=task, use_cache=cache, use_model_cache=model_cache, report_dir=report_dir, features=feature,
-            random_seed=seed, verbose=verbose, formal_run=formal_run, n_random_search=random_search)
+            random_seed=seed, verbose=verbose, formal_run=formal_run, n_random_search=random_search,
+            use_jumanpp=jumanpp)
 
 
 if __name__ == '__main__':
