@@ -332,10 +332,11 @@ def define_model(n_random_search: int = 100) -> Model:
     return rfcv
 
 
-def evaluate_on_testset(model: Model, X_test, y_test) -> Tuple[str, np.array]:
+def evaluate_on_testset(model: Model, X_test, y_test) -> Tuple[str, np.array, np.array]:
     predictions = model.predict(X_test)
+    probabilities = model.predict_proba(X_test)
     report = metrics.classification_report(y_test, predictions, target_names=LABELCOLS)
-    return report, predictions
+    return report, predictions, probabilities
 
 
 def _get_types(v: int) -> str:
@@ -383,7 +384,7 @@ def error_analysis(df_test: pd.DataFrame, predictions: np.array, model: Model) -
     return df[_columns]
 
 
-def make_submission(df_test: pd.DataFrame, predictions: np.array) -> pd.DataFrame:
+def to_submission_df(df_test: pd.DataFrame, predictions: np.array) -> pd.DataFrame:
     """Format outputs for submission"""
     _columns = ['ID', 'Tweet'] + LABELCOLS
     df = df_test.loc[:, _columns].copy()
@@ -391,6 +392,16 @@ def make_submission(df_test: pd.DataFrame, predictions: np.array) -> pd.DataFram
         preds = pd.Series(predictions[:, i], index=df['ID'], dtype=bool)
         df[colname] = preds.values
         df[colname] = df[colname].apply(lambda s: 'p' if s is True else 'n')
+    return df[_columns]
+
+
+def to_prob_df(df_test: pd.DataFrame, probabilities: np.array) -> pd.DataFrame:
+    """TODO: rethink design"""
+    _columns = ['ID', 'Tweet'] + LABELCOLS
+    df = df_test.loc[:, _columns].copy()
+    for i, colname in enumerate(LABELCOLS):
+        probs = pd.Series(probabilities[i][:, 1], index=df['ID'], dtype=np.double)
+        df[colname] = probs.values
     return df[_columns]
 
 
@@ -542,7 +553,7 @@ def end2end(task: str = 'ja',
     Xts = vectorizer.transform(Xts)
 
     if not formal_run:
-        report, predictions = evaluate_on_testset(rfcv_model, Xts, yts)
+        report, predictions, probabilities = evaluate_on_testset(rfcv_model, Xts, yts)
         print()
         print(report)
         print()
@@ -566,8 +577,13 @@ def end2end(task: str = 'ja',
                            encoding='utf-8-sig')
     else:
         predictions = rfcv_model.predict(Xts)
+        probabilities = rfcv_model.predict_proba(Xts)
 
-    submission_df = make_submission(test_df, predictions)
+    probs_df = to_prob_df(test_df, probabilities)
+    probs_fn = report_dir / Path('probs')
+    probs_df.to_csv(str(probs_fn.with_suffix('.csv')), index=False, encoding='utf-8-sig')
+
+    submission_df = to_submission_df(test_df, predictions)
     submission_fn = report_dir / Path('submission')
     submission_df.to_csv(str(submission_fn.with_suffix('.csv')), index=False, encoding='utf-8-sig')
     submission_df.to_excel(str(submission_fn.with_suffix('.xlsx')), index=False, encoding='utf-8-sig')
@@ -580,6 +596,9 @@ def end2end(task: str = 'ja',
     logger.info('All done.')
 
 
+#
+# Command line interface
+#
 @click.command()
 @click.argument('task', type=str)
 @click.option('--formal-run', is_flag=True, default=False)
