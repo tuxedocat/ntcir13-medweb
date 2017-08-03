@@ -3,8 +3,6 @@
 from typing import *
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn
 import os
 import sys
 from pathlib import Path
@@ -32,6 +30,7 @@ from features.basics import ngram_features
 from krankenfinder.features.ja_semantics import SemanticFeatures
 from krankenfinder.features import bow_juman
 from krankenfinder.utils.normalize import normalize_neologd
+from krankenfinder import postprocessor
 
 import logging
 import logging.config
@@ -308,9 +307,17 @@ def define_model(n_random_search: int = 100) -> Model:
     return rfcv
 
 
-def evaluate_on_testset(model: Model, X_test, y_test) -> Tuple[str, np.array, np.array]:
+def get_preds_and_probs(model: Model, X_test, use_postprocess: bool = False):
     predictions = model.predict(X_test)
+    if use_postprocess:
+        predictions = postprocessor.apply_pp(predictions)
+
     probabilities = model.predict_proba(X_test)
+    return predictions, probabilities
+
+
+def evaluate_on_testset(model: Model, X_test, y_test, use_postprocess: bool = False) -> Tuple[str, np.array, np.array]:
+    predictions, probabilities = get_preds_and_probs(model, X_test, use_postprocess)
     report = metrics.classification_report(y_test, predictions, target_names=LABELCOLS)
     return report, predictions, probabilities
 
@@ -405,7 +412,9 @@ def end2end(task: str = 'ja',
             verbose: bool = False,
             formal_run: bool = False,
             n_random_search: int = 100,
-            use_jumanpp: bool = False):
+            use_jumanpp: bool = False,
+            postprocess: bool = False,
+            selftest: bool = False):
     """Main API"""
 
     # Setup logger
@@ -480,12 +489,16 @@ def end2end(task: str = 'ja',
     else:
         df = load_dataset(corpus)
         df = preprocess_df(df, userdict=_userdict, jumanpp=use_jumanpp)
-        if not formal_run:
-            train_df, test_df = train_test_split(df, random_seed=random_seed)
-        else:
+        if formal_run:
             train_df = df
             test_df = load_dataset(test_corpus)
             test_df = preprocess_df(test_df, userdict=_userdict, jumanpp=use_jumanpp)
+        elif selftest:
+            logger.info("---SELF TESTING---")
+            train_df = deepcopy(df)
+            test_df = deepcopy(df)
+        else:
+            train_df, test_df = train_test_split(df, random_seed=random_seed)
 
         pd.to_pickle(train_df, get_fn(cache_dir, task + '_train', '.pkl.gz'))
         pd.to_pickle(test_df, get_fn(cache_dir, task + '_test', '.pkl.gz'))
@@ -529,7 +542,7 @@ def end2end(task: str = 'ja',
     Xts = vectorizer.transform(Xts)
 
     if not formal_run:
-        report, predictions, probabilities = evaluate_on_testset(rfcv_model, Xts, yts)
+        report, predictions, probabilities = evaluate_on_testset(rfcv_model, Xts, yts, postprocess)
         print()
         print(report)
         print()
@@ -552,8 +565,7 @@ def end2end(task: str = 'ja',
         report_df.to_excel(str(analysis_fn.with_suffix('.xlsx')), sheet_name='result', index=False,
                            encoding='utf-8-sig')
     else:
-        predictions = rfcv_model.predict(Xts)
-        probabilities = rfcv_model.predict_proba(Xts)
+        predictions, probabilities = get_preds_and_probs(rfcv_model, Xts, postprocess)
 
     probs_df = to_prob_df(test_df, probabilities)
     probs_fn = report_dir / Path('probs')
@@ -578,19 +590,32 @@ def end2end(task: str = 'ja',
 @click.command()
 @click.argument('task', type=str)
 @click.option('--formal-run', is_flag=True, default=False)
+@click.option('--selftest', is_flag=True, default=False)
+@click.option('--feature', '-f', type=str, multiple=True, help='eg. -f pas -f suf -f userdict')
 @click.option('--cache', is_flag=True, default=False)
 @click.option('--model-cache', is_flag=True, default=False)
+@click.option('--jumanpp', is_flag=True, default=False)
+@click.option('--postprocess', is_flag=True, default=False)
 @click.option('--report-dir', type=str, default='../reports')
-@click.option('--feature', '-f', type=str, multiple=True, help='eg. -f pas -f suf -f userdict')
-@click.option('--verbose', '-v', is_flag=True, default=False)
 @click.option('--seed', type=int, help='random seed which is used for train/test split')
 @click.option('--random-search', type=int, default=100, help='number of iteration of random-parameter-search')
-@click.option('--jumanpp', is_flag=True, default=False)
-def cli(task, cache, model_cache, report_dir, feature, seed, verbose, formal_run, random_search, jumanpp):
+@click.option('--verbose', '-v', is_flag=True, default=False)
+def cli(task,
+        cache,
+        model_cache,
+        report_dir,
+        feature,
+        postprocess,
+        seed,
+        verbose,
+        formal_run,
+        random_search,
+        jumanpp,
+        selftest):
     print('Features: {}'.format(feature))
     end2end(task=task, use_cache=cache, use_model_cache=model_cache, report_dir=report_dir, features=feature,
             random_seed=seed, verbose=verbose, formal_run=formal_run, n_random_search=random_search,
-            use_jumanpp=jumanpp)
+            use_jumanpp=jumanpp, postprocess=postprocess, selftest=selftest)
 
 
 if __name__ == '__main__':
