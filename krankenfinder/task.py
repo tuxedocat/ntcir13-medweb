@@ -51,20 +51,17 @@ LABELCOLS = ['Influenza', 'Diarrhea', 'Hayfever', 'Cough', 'Headache', 'Fever', 
 Model = Union[RandomForestClassifier, RandomizedSearchCV]
 
 
-class ModelDefinition:
-    def __init__(self, model: Model, dv: DictVectorizer, comment: str = None) -> None:
-        self.model = model
-        self.dv = dv
-        self.comments = comment if comment else ''
-
-
 def load_dataset(corpus_path: Path) -> Optional[pd.DataFrame]:
     """Load dataset from given xlsx or csv files, as dataframe
 
-    :param corpus_path:
-    :type corpus_path:
-    :return:
-    :rtype:
+    Parameters
+    ----------
+    corpus_path : pathlib.Path
+        dataset file's path
+
+    Returns
+    -------
+    loaded dataframe
     """
 
     def get_sheetname(p: Path) -> str:
@@ -97,11 +94,7 @@ def _parser_func_mecab_detailed(parser: MeCab) -> Callable[[str], List[Tuple[str
 
 
 def _get_lemma(node: MeCabNode) -> str:
-    """Assuming format "<surface>,<pos>,<posd>,<lemma>"
-
-    :param node:
-    :return:
-    """
+    """Assuming format "<surface>,<pos>,<posd>,<lemma>" """
     try:
         return node.feature.split(',')[3]
     except IndexError:
@@ -176,13 +169,6 @@ def _check_lang(df: pd.DataFrame) -> str:
 def preprocess_df(df: pd.DataFrame, userdict: str = None, jumanpp: bool = False) -> pd.DataFrame:
     """Perform preprocessing for given dataframe,
     including, binarizing p/n labels to 1/0, normalization (JP), adding column of tokenized sentence.
-
-    :param userdict:
-    :type userdict:
-    :param df:
-    :type df:
-    :return:
-    :rtype:
     """
     df = _binarize_pn(df)
 
@@ -199,17 +185,7 @@ def preprocess_df(df: pd.DataFrame, userdict: str = None, jumanpp: bool = False)
 
 def train_test_split(df: pd.DataFrame, ratio: float = 0.8, random_seed: Optional[int] = None) \
         -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Perform train/test split
-
-    :param random_seed:
-    :type random_seed:
-    :param ratio:
-    :type ratio:
-    :param df:
-    :type df:
-    :return:
-    :rtype:
-    """
+    """Perform train/test split """
     split_id = int(len(df) * ratio)
     _df = sklearn.utils.shuffle(df.copy(), random_state=random_seed)
     train = _df.iloc[:split_id]
