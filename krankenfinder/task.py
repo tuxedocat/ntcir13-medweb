@@ -11,6 +11,7 @@ from collections import Counter
 from copy import deepcopy
 import pickle
 import click
+from tqdm import tqdm
 
 import sklearn
 from sklearn import model_selection
@@ -198,7 +199,8 @@ def add_surface_feature(df: pd.DataFrame) -> pd.DataFrame:
     def get_counts_of_words(l: List[str]) -> List[Tuple[str, int]]:
         return list(Counter(l).items())
 
-    df['f_surface'] = df['words'].apply(get_counts_of_words)
+    tqdm.pandas()
+    df['f_surface'] = df['words'].progress_apply(get_counts_of_words)
     logger.info('Extracted word-surface features')
     return df
 
@@ -210,24 +212,21 @@ def add_ngram_feature(df: pd.DataFrame, n: int = 3) -> pd.DataFrame:
     return df
 
 
-def add_semantic_feature(df: pd.DataFrame, verbose=False) -> pd.DataFrame:
+def add_semantic_feature(df: pd.DataFrame, verbose=False, logger=None, jumanpp=False) -> pd.DataFrame:
     """Add semantic feature column to given dataframe
 
     .. note:: currently implemented only for Japanese tweets
     """
-    fe = SemanticFeatures(verbose=verbose)
-    logger = logging.getLogger(__name__)
-    if verbose:
-        logging.basicConfig(level=logging.DEBUG)
-
+    fe = SemanticFeatures(verbose=verbose, logger=logger, jumanpp=jumanpp)
     logger.info('Started extracting semantic features')
+    tqdm.pandas()
 
     def get_semantic_featuredict(s: str) -> List[Tuple[str, int]]:
         _ = fe.pas_features(s)  # type: Dict[str, int]
         return list(_.items())
 
-    df['f_semantic'] = df['raw'].apply(get_semantic_featuredict)
-    logger.info('Extracted semantic features')
+    df['f_semantic'] = df['raw'].progress_apply(get_semantic_featuredict)
+    logger.info('{}: Extracted semantic features'.format(__name__))
     return df
 
 
@@ -255,6 +254,7 @@ def feature_extraction(df: pd.DataFrame,
                        surface=True,
                        ngram_n: Union[Tuple[int], Tuple[int, int], None] = (3,),
                        semantic=True,
+                       logger=None,
                        verbose=False) -> np.array:
     # use deepcopy instead of df.copy() because it doesn't recursively copy objects even when deep=True.
     df = deepcopy(df)
@@ -267,7 +267,7 @@ def feature_extraction(df: pd.DataFrame,
     if semantic:
         lang = _check_lang(df)
         if lang == 'ja':
-            df = add_semantic_feature(df, verbose=verbose)
+            df = add_semantic_feature(df, verbose=verbose, logger=logger, jumanpp=False)
 
     df['features'] = np.empty((len(df['ID']), 0)).tolist()
     _merge_feature_columns(df)
@@ -286,13 +286,13 @@ def define_model(n_random_search: int = 100) -> Model:
     # rf = ExtraTreesClassifier(random_state=None)
     _n_estimators = list(range(8, 64, 4))
     _n_estimators += [100, 250, 500, 1000, 2000]
-    _max_depth = list(range(8, 24, 2))
-    _max_depth.append(None)
+    _max_depth = list(range(8, 32, 2))
+    # _max_depth.append(None)
 
     search_space = dict(
         n_estimators=_n_estimators,
         criterion=['gini', 'entropy'],
-        max_features=['auto', 'log2', None],
+        max_features=['auto', 'log2', 1.0],
         max_depth=_max_depth
     )
 
@@ -502,7 +502,8 @@ def end2end(task: str = 'ja',
 
         pd.to_pickle(train_df, get_fn(cache_dir, task + '_train', '.pkl.gz'))
         pd.to_pickle(test_df, get_fn(cache_dir, task + '_test', '.pkl.gz'))
-        Xtr = feature_extraction(train_df, surface=_f_surface, semantic=_f_semantic, ngram_n=_ns, verbose=verbose)
+        Xtr = feature_extraction(train_df, surface=_f_surface, semantic=_f_semantic, ngram_n=_ns, verbose=verbose,
+                                 logger=logger)
         Xtr = np.array(list(map(dict, Xtr)))
         ytr = get_labels(train_df)
         np.save(get_fn(cache_dir, task + '_Xtrain', '.npy'), Xtr)
@@ -533,7 +534,8 @@ def end2end(task: str = 'ja',
         Xts = np.load(get_fn(cache_dir, task + '_Xtest', '.npy'))
         yts = np.load(get_fn(cache_dir, task + '_ytest', '.npy'))
     else:
-        Xts = feature_extraction(test_df, surface=_f_surface, semantic=_f_semantic, ngram_n=_ns, verbose=verbose)
+        Xts = feature_extraction(test_df, surface=_f_surface, semantic=_f_semantic, ngram_n=_ns, verbose=verbose,
+                                 logger=logger)
         Xts = np.array(list(map(dict, Xts)))
         yts = get_labels(test_df)
         np.save(get_fn(cache_dir, task + '_Xtest', '.npy'), Xts)

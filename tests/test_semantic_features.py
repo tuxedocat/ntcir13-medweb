@@ -74,8 +74,15 @@ def test_get_ne(argument_dummy):
     assert result == 'PERSON'
 
 
-def test_get_featuredict():
+def test_get_featuredict1():
     sf = SemanticFeatures()
     fdic = sf.pas_features("太郎が、お年寄りに席を譲った人に声をかけていた。")
+    assert fdic
+    print(fdic)
+
+
+def test_get_featuredict2():
+    sf = SemanticFeatures()
+    fdic = sf.pas_features("家に帰ると、娘が熱を出していたよ。リンパも腫れてるし。明日病院に行こう。")
     assert fdic
     print(fdic)

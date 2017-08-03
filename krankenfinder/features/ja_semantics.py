@@ -95,17 +95,27 @@ class PAS:
 
     def featuredict(self, exclude_NAs=True) -> Dict[str, int]:
         fdic = {}  # type: Dict[str, int]
-        fdic.update({'p-surf-{}'.format(self.p.surface): 1})
-        fdic.update({'p-{}'.format(self.p.tense): 1})
-        fdic.update({'ga-surf-{}'.format(self.ga.surface): 1})
-        fdic.update({'wo-surf-{}'.format(self.wo.surface): 1})
-        fdic.update({'ni-surf-{}'.format(self.ni.surface): 1})
-        fdic.update({'ga-ne-{}'.format(self.ga.ne): 1})
-        fdic.update({'wo-ne-{}'.format(self.wo.ne): 1})
-        fdic.update({'ni-ne-{}'.format(self.ni.ne): 1})
+        fdic.update({'p-surf={}'.format(self.p.surface): 1})
+        fdic.update({'p-tense={}/{}'.format(self.p.surface, self.p.tense): 1})
+        fdic.update({'ga-surf={}'.format(self.ga.surface): 1})
+        fdic.update({'wo-surf={}'.format(self.wo.surface): 1})
+        fdic.update({'ni-surf={}'.format(self.ni.surface): 1})
+        fdic.update({'ga-ne={}'.format(self.ga.ne): 1})
+        fdic.update({'wo-ne={}'.format(self.wo.ne): 1})
+        fdic.update({'ni-ne={}'.format(self.ni.ne): 1})
+        fdic.update({'ga-surf={}/{}'.format(self.ga.surface, self.p.surface): 1})
+        fdic.update({'wo-surf={}/{}'.format(self.wo.surface, self.p.surface): 1})
+        fdic.update({'ni-surf={}/{}'.format(self.ni.surface, self.p.surface): 1})
+        fdic.update({'ga-ne={}/{}'.format(self.ga.ne, self.p.surface): 1})
+        fdic.update({'wo-ne={}/{}'.format(self.wo.ne, self.p.surface): 1})
+        fdic.update({'ni-ne={}/{}'.format(self.ni.ne, self.p.surface): 1})
+        fdic.update({'pas-f={}/{}/{}/{}'.format(self.ga.surface, self.wo.surface, self.ni.surface, self.p.surface): 1})
+        fdic.update({'pas-2={}/{}'.format(self.ga.surface, self.p.surface): 1})
+        fdic.update({'pas-2={}/{}'.format(self.ga.ne, self.p.surface): 1})
+        fdic.update({'pas-3={}/{}/{}'.format(self.ga.surface, self.wo.surface, self.p.surface): 1})
 
         if exclude_NAs:
-            self.features = {k: v for k, v in fdic.items() if not k.endswith('-NA')}
+            self.features = {k: v for k, v in fdic.items() if 'NA' not in k}
         else:
             self.features = fdic
         return self.features
@@ -114,9 +124,15 @@ class PAS:
 class SemanticFeatures:
     """意味的素性抽出器"""
 
-    def __init__(self, verbose=False):
-        self._knp = pyknp.KNP(jumanpp=False)
+    def __init__(self, logger=None, verbose=False, jumanpp=False):
+        self._knp = pyknp.KNP(jumanpp=jumanpp)
         self.verbose = verbose
+        if logger:
+            self.logger = logger
+        else:
+            self.logger = logging.getLogger(__name__)
+            logging.basicConfig(level=logging.WARNING)
+            logging.captureWarnings(True)
 
     def __del__(self):
         del self._knp
