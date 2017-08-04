@@ -279,7 +279,7 @@ def get_labels(df: pd.DataFrame) -> np.array:
     return df[LABELCOLS].values
 
 
-def define_model(n_random_search: int = 100) -> Model:
+def define_model(n_random_search: int = 100, n_jobs: int = None) -> Model:
     # TODO: needs refinements
     rf = RandomForestClassifier(random_state=None)
     # Or Extremely Randomized Trees, but currently no big difference in terms of performance.
@@ -295,7 +295,10 @@ def define_model(n_random_search: int = 100) -> Model:
         max_depth=_max_depth
     )
 
-    ncores = joblib.cpu_count() // 2  # ... be nice.
+    if n_jobs:
+        ncores = n_jobs
+    else:
+        ncores = joblib.cpu_count()
     rfcv = model_selection.RandomizedSearchCV(estimator=rf,
                                               param_distributions=search_space,
                                               n_iter=n_random_search,
@@ -413,7 +416,8 @@ def end2end(task: str = 'ja',
             n_random_search: int = 100,
             use_jumanpp: bool = False,
             postprocess: bool = False,
-            selftest: bool = False):
+            selftest: bool = False,
+            n_jobs: int = None):
     """Main API"""
 
     # Setup logger
@@ -519,7 +523,7 @@ def end2end(task: str = 'ja',
             rfcv_model = pickle.load(f)
     else:
         # Train model using randomized CV
-        rfcv_model = define_model(n_random_search=n_random_search)
+        rfcv_model = define_model(n_random_search=n_random_search, n_jobs=n_jobs)
         logger.info('Training model...')
         rfcv_model.fit(Xtr, ytr)
         logger.info('Training model... Done.')
@@ -599,6 +603,7 @@ def end2end(task: str = 'ja',
 @click.option('--postprocess', is_flag=True, default=False)
 @click.option('--report-dir', type=str, default='../reports')
 @click.option('--seed', type=int, help='random seed which is used for train/test split')
+@click.option('--n-jobs', type=int, default=None, help='Parallelism: default = n-cores')
 @click.option('--random-search', type=int, default=100, help='number of iteration of random-parameter-search')
 @click.option('--verbose', '-v', is_flag=True, default=False)
 def cli(task,
@@ -612,11 +617,12 @@ def cli(task,
         formal_run,
         random_search,
         jumanpp,
-        selftest):
+        selftest,
+        n_jobs):
     print('Features: {}'.format(feature))
     end2end(task=task, use_cache=cache, use_model_cache=model_cache, report_dir=report_dir, features=feature,
             random_seed=seed, verbose=verbose, formal_run=formal_run, n_random_search=random_search,
-            use_jumanpp=jumanpp, postprocess=postprocess, selftest=selftest)
+            use_jumanpp=jumanpp, postprocess=postprocess, selftest=selftest, n_jobs=n_jobs)
 
 
 if __name__ == '__main__':
