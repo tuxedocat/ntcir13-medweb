@@ -29,7 +29,7 @@ import spacy
 
 from features.basics import ngram_features
 from krankenfinder.features.ja_semantics import SemanticFeatures
-from krankenfinder.features import bow_juman
+from krankenfinder.features import bow_juman, bow_spacy
 from krankenfinder.utils.normalize import normalize_neologd
 from krankenfinder import postprocessor
 
@@ -121,13 +121,6 @@ def _parser_func_mecab(parser: MeCab) -> Callable[[str], List[str]]:
     return parse_to_surf
 
 
-def _tokenizer_func(spacy_model: spacy.en.English) -> Callable[[str], List[str]]:
-    def tokenizer_f(s: str) -> List[str]:
-        return [w.lemma_ for w in spacy_model(s)]
-
-    return tokenizer_f
-
-
 def _binarize_pn(df: pd.DataFrame) -> pd.DataFrame:
     for c in LABELCOLS:
         # cast to float64 for later use with sklearn
@@ -155,8 +148,7 @@ def _pp_ja(df: pd.DataFrame, userdict: str = None, jumanpp: bool = False) -> pd.
 
 
 def _pp_en(df: pd.DataFrame) -> pd.DataFrame:
-    sp = spacy.load('en')
-    tokenizer_ = _tokenizer_func(sp)
+    tokenizer_ = bow_spacy.parser_func_en_suf()
     df['words'] = df['Tweet'].apply(tokenizer_)
     # TODO: Implement normalization for English tweets if needed.
     df['raw'] = df['Tweet'].copy()
@@ -256,7 +248,7 @@ def feature_extraction(df: pd.DataFrame,
                        ngram_n: Union[Tuple[int], Tuple[int, int], None] = (3,),
                        semantic=True,
                        logger=None,
-                       verbose=False) -> np.array:
+                       verbose=False) -> Tuple[np.array, pd.DataFrame]:
     # use deepcopy instead of df.copy() because it doesn't recursively copy objects even when deep=True.
     df = deepcopy(df)
     if surface:
@@ -273,7 +265,7 @@ def feature_extraction(df: pd.DataFrame,
     df['features'] = np.empty((len(df['ID']), 0)).tolist()
     _merge_feature_columns(df)
 
-    return df['features'].values
+    return df['features'].values, df
 
 
 def get_labels(df: pd.DataFrame) -> np.array:
@@ -506,12 +498,14 @@ def end2end(task: str = 'ja',
 
         pd.to_pickle(train_df, get_fn(cache_dir, task + '_train', '.pkl.gz'))
         pd.to_pickle(test_df, get_fn(cache_dir, task + '_test', '.pkl.gz'))
-        Xtr = feature_extraction(train_df, surface=_f_surface, semantic=_f_semantic, ngram_n=_ns, verbose=verbose,
-                                 logger=logger)
+        Xtr, _dbg_df = feature_extraction(train_df, surface=_f_surface, semantic=_f_semantic, ngram_n=_ns,
+                                          verbose=verbose,
+                                          logger=logger)
         Xtr = np.array(list(map(dict, Xtr)))
         ytr = get_labels(train_df)
         np.save(get_fn(cache_dir, task + '_Xtrain', '.npy'), Xtr)
         np.save(get_fn(cache_dir, task + '_ytrain', '.npy'), ytr)
+        pd.to_pickle(_dbg_df, get_fn(cache_dir, task + '_train_features', '.pkl.gz'))
 
     vectorizer = DictVectorizer()
 
@@ -538,12 +532,14 @@ def end2end(task: str = 'ja',
         Xts = np.load(get_fn(cache_dir, task + '_Xtest', '.npy'))
         yts = np.load(get_fn(cache_dir, task + '_ytest', '.npy'))
     else:
-        Xts = feature_extraction(test_df, surface=_f_surface, semantic=_f_semantic, ngram_n=_ns, verbose=verbose,
-                                 logger=logger)
+        Xts, _dbg_df = feature_extraction(test_df, surface=_f_surface, semantic=_f_semantic, ngram_n=_ns,
+                                          verbose=verbose,
+                                          logger=logger)
         Xts = np.array(list(map(dict, Xts)))
         yts = get_labels(test_df)
         np.save(get_fn(cache_dir, task + '_Xtest', '.npy'), Xts)
         np.save(get_fn(cache_dir, task + '_ytest', '.npy'), yts)
+        pd.to_pickle(_dbg_df, get_fn(cache_dir, task + '_test_features', '.pkl.gz'))
 
     Xts = vectorizer.transform(Xts)
 

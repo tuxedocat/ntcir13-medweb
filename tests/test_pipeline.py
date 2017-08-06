@@ -35,7 +35,7 @@ def load_dataframe():
 def test_feature_extractor(load_dataframe):
     df = load_dataframe
     df = task.preprocess_df(df)
-    X = task.feature_extraction(df)
+    X, _ = task.feature_extraction(df)
     assert X is not None
     print(X)
 
@@ -46,7 +46,7 @@ def test_evaluation(load_dataframe):
     df = task.preprocess_df(df)
 
     train_df, test_df = task.train_test_split(df, random_seed=12345)
-    Xtr = task.feature_extraction(train_df)
+    Xtr, _ = task.feature_extraction(train_df)
     Xtr = np.array(list(map(dict, Xtr)))
     ytr = task.get_labels(train_df)
     vectorizer = DictVectorizer()
@@ -54,11 +54,11 @@ def test_evaluation(load_dataframe):
     rfcv_model = task.define_model()
     rfcv_model.fit(Xtr, ytr)
 
-    Xts = task.feature_extraction(test_df)
+    Xts, _ = task.feature_extraction(test_df)
     Xts = np.array(list(map(dict, Xts)))
     yts = task.get_labels(test_df)
     Xts = vectorizer.transform(Xts)
-    report, predictions = task.evaluate_on_testset(rfcv_model, Xts, yts)
+    report, predictions, _ = task.evaluate_on_testset(rfcv_model, Xts, yts)
     print(report)
 
     report_df = task.error_analysis(test_df, predictions, rfcv_model)
