@@ -148,7 +148,8 @@ def _pp_ja(df: pd.DataFrame, userdict: str = None, jumanpp: bool = False) -> pd.
         parser = bow_juman.parser_func_jumanpp(lemmatize=True)
         logger.info('Using Juman++ instead of MeCab')
 
-    df['words'] = df['Tweet'].apply(parser)
+    tqdm.pandas()
+    df['words'] = df['Tweet'].progress_apply(parser)
     df['raw'] = df['Tweet'].copy()  # TODO: add some preprocess for KNP
     return df
 
@@ -291,7 +292,7 @@ def define_model(n_random_search: int = 100, n_jobs: int = None) -> Model:
     search_space = dict(
         n_estimators=_n_estimators,
         criterion=['gini', 'entropy'],
-        max_features=['auto', 'log2', 0.75],
+        max_features=['auto', 'log2', None],
         max_depth=_max_depth
     )
 
@@ -546,31 +547,37 @@ def end2end(task: str = 'ja',
 
     Xts = vectorizer.transform(Xts)
 
-    if not formal_run:
-        report, predictions, probabilities = evaluate_on_testset(rfcv_model, Xts, yts, postprocess)
-        print()
-        print(report)
-        print()
+    result_fn = _report_dir / Path('result.log')
+    with result_fn.open('w') as log:
+        log.write('task={}_{}\n'.format(task, 'formal-run' if formal_run else 'dry-run'))
+        log.write('training-corpus={}\n'.format(str(corpus)))
+        log.write('testtype={}\n'.format('self-test' if selftest else 'test-corpus'))
+        log.write('seed={}\n'.format(random_seed))
+        log.write('features={}\n'.format(features))
+        log.write('postprocess={}\n'.format(postprocess))
+        log.write('bow-tokenizer={}\n'.format('Juman++' if use_jumanpp else 'MeCab-NEologd'))
+        try:
+            log.write('model={}\n'.format(rfcv_model.best_estimator_))
+        except AttributeError:
+            log.write('model={}\n'.format(rfcv_model))
 
-        report_df = error_analysis(test_df, predictions, rfcv_model)
-        result_fn = _report_dir / Path('result.log')
-        analysis_fn = _report_dir / Path('analysis')
-        with result_fn.open('w') as log:
-            log.write(report)
+        if not formal_run:
+            report, predictions, probabilities = evaluate_on_testset(rfcv_model, Xts, yts, postprocess)
+            print()
+            print(report)
+            print()
+
+            report_df = error_analysis(test_df, predictions, rfcv_model)
+            analysis_fn = _report_dir / Path('analysis')
             log.write('\n\n')
-            log.write('seed={}\n'.format(random_seed))
-            log.write('features={}\n'.format(features))
-            try:
-                log.write('model={}\n'.format(rfcv_model.best_estimator_))
-            except AttributeError:
-                log.write('model={}\n'.format(rfcv_model))
+            log.write(report)
 
-        # Pandas doesn't work properly with Path obj., conversion to string is workaround.
-        report_df.to_csv(str(analysis_fn.with_suffix('.csv')), index=False, encoding='utf-8-sig')
-        report_df.to_excel(str(analysis_fn.with_suffix('.xlsx')), sheet_name='result', index=False,
-                           encoding='utf-8-sig')
-    else:
-        predictions, probabilities = get_preds_and_probs(rfcv_model, Xts, postprocess)
+            # Pandas doesn't work properly with Path obj., conversion to string is workaround.
+            report_df.to_csv(str(analysis_fn.with_suffix('.csv')), index=False, encoding='utf-8-sig')
+            report_df.to_excel(str(analysis_fn.with_suffix('.xlsx')), sheet_name='result', index=False,
+                               encoding='utf-8-sig')
+        else:
+            predictions, probabilities = get_preds_and_probs(rfcv_model, Xts, postprocess)
 
     probs_df = to_prob_df(test_df, probabilities)
     probs_fn = report_dir / Path('probs')
