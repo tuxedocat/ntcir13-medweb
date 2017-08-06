@@ -29,7 +29,7 @@ import spacy
 
 from features.basics import ngram_features
 from krankenfinder.features.ja_semantics import SemanticFeatures
-from krankenfinder.features import bow_juman, bow_spacy
+from krankenfinder.features import bow_juman, bow_spacy, rule_based
 from krankenfinder.utils.normalize import normalize_neologd
 from krankenfinder import postprocessor
 
@@ -223,6 +223,13 @@ def add_semantic_feature(df: pd.DataFrame, verbose=False, logger=None, jumanpp=F
     return df
 
 
+def add_rulebased_feature(df: pd.DataFrame) -> pd.DataFrame:
+    logger.info('Extracting Rule-based features')
+    tqdm.pandas()
+    df['f_rules'] = df['raw'].progress_apply(rule_based.rulebased_features_ja)
+    return df
+
+
 def _merge_feature_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Prerequisite: df must have 'features' column
 
@@ -246,6 +253,7 @@ def _merge_feature_columns(df: pd.DataFrame) -> pd.DataFrame:
 def feature_extraction(df: pd.DataFrame,
                        surface=True,
                        ngram_n: Union[Tuple[int], Tuple[int, int], None] = (3,),
+                       rule_based=False,
                        semantic=True,
                        logger=None,
                        verbose=False) -> Tuple[np.array, pd.DataFrame]:
@@ -261,6 +269,11 @@ def feature_extraction(df: pd.DataFrame,
         lang = _check_lang(df)
         if lang == 'ja':
             df = add_semantic_feature(df, verbose=verbose, logger=logger, jumanpp=False)
+
+    if rule_based:
+        lang = _check_lang(df)
+        if lang == 'ja':
+            df = add_rulebased_feature(df)
 
     df['features'] = np.empty((len(df['ID']), 0)).tolist()
     _merge_feature_columns(df)
@@ -463,6 +476,11 @@ def end2end(task: str = 'ja',
     else:
         _userdict = None
 
+    if 'rules' in features or 'heuristics' in features:
+        _f_rules = True
+    else:
+        _f_rules = False
+
     # Output dirs
     if report_dir:
         _report_dir = Path(report_dir)
@@ -499,6 +517,7 @@ def end2end(task: str = 'ja',
         pd.to_pickle(train_df, get_fn(cache_dir, task + '_train', '.pkl.gz'))
         pd.to_pickle(test_df, get_fn(cache_dir, task + '_test', '.pkl.gz'))
         Xtr, _dbg_df = feature_extraction(train_df, surface=_f_surface, semantic=_f_semantic, ngram_n=_ns,
+                                          rule_based=_f_rules,
                                           verbose=verbose,
                                           logger=logger)
         Xtr = np.array(list(map(dict, Xtr)))
@@ -533,6 +552,7 @@ def end2end(task: str = 'ja',
         yts = np.load(get_fn(cache_dir, task + '_ytest', '.npy'))
     else:
         Xts, _dbg_df = feature_extraction(test_df, surface=_f_surface, semantic=_f_semantic, ngram_n=_ns,
+                                          rule_based=_f_rules,
                                           verbose=verbose,
                                           logger=logger)
         Xts = np.array(list(map(dict, Xts)))
