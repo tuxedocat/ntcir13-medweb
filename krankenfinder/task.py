@@ -291,13 +291,12 @@ def define_model(n_random_search: int = 100, n_jobs: int = None) -> Model:
     # Or Extremely Randomized Trees, but currently no big difference in terms of performance.
     # rf = ExtraTreesClassifier(random_state=None)
     _n_estimators = list(range(8, 128, 4))
-    _n_estimators += [256, 512, 1024, 2048]
     _max_depth = list(range(8, 32, 1))
 
     search_space = dict(
         n_estimators=_n_estimators,
         criterion=['gini', 'entropy'],
-        max_features=['auto', 'log2', None],
+        max_features=['auto', 'log2', 0.5, None],
         max_depth=_max_depth
     )
 
